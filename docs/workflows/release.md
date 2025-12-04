@@ -1,284 +1,470 @@
 # Release Workflow
 
-Automated release workflow with semantic versioning support for GitHub repositories.
+Automated release workflow using semantic-release for fully automated version management and package publishing.
 
 ## Overview
 
-The release workflow automates the process of creating GitHub releases with proper semantic versioning, automatic changelog generation, and flexible release options.
+The release workflow uses [semantic-release](https://semantic-release.gitbook.io/) to automate the entire release process based on [Conventional Commits](https://www.conventionalcommits.org/). It automatically determines the next version number, generates release notes, creates GitHub releases, and updates the changelog - all without manual intervention.
 
 ## Features
 
-- ✅ **Semantic Versioning** - Strict validation of semver format (MAJOR.MINOR.PATCH)
-- 📝 **Automatic Changelog** - Grouped by commit types (features, fixes, docs, etc.)
-- 🏷️ **Pre-release Support** - Auto-detection or manual specification
-- 📦 **Draft Releases** - Create draft releases for review
-- 🔄 **Multiple Triggers** - Tag push or manual workflow dispatch
-- 📊 **Release Notes** - Formatted changelog with commit links
-- 💬 **Discussion Integration** - Automatically creates discussion in Announcements
+- 🤖 **Fully Automated** - No manual version bumping or changelog writing
+- ✅ **Semantic Versioning** - Automatic version calculation based on commit messages
+- 📝 **Auto-Generated Changelogs** - Beautiful, categorized release notes
+- 🏷️ **Auto Tag & Release** - Automatically creates tags and GitHub releases
+- 🔀 **Multi-Branch Support** - main/master, next, beta, alpha, and maintenance branches
+- 🎯 **Conventional Commits** - Enforces commit message standards
+- 🛡️ **Safe & Idempotent** - Won't create duplicate releases
+- 🧪 **Dry Run Mode** - Test releases without publishing
+- 🔑 **Flexible Token** - Use default or custom GitHub token
+
+## How It Works
+
+1. **Analyze Commits** - Scans commits since last release using Conventional Commits format
+2. **Determine Version** - Calculates next version based on commit types:
+   - `feat:` → Minor version bump (1.0.0 → 1.1.0)
+   - `fix:` → Patch version bump (1.0.0 → 1.0.1)
+   - `BREAKING CHANGE:` → Major version bump (1.0.0 → 2.0.0)
+3. **Generate Changelog** - Creates categorized release notes
+4. **Create Tag** - Creates git tag with version number
+5. **Publish Release** - Creates GitHub release with notes
+6. **Update Files** - Commits CHANGELOG.md back to repository
 
 ## Triggers
 
-### 1. Tag Push (Recommended)
+### 1. Automatic (Push to Branch)
 
-Automatically trigger release creation when pushing a semver tag:
+The workflow automatically runs when code is pushed to release branches:
 
 ```bash
-# Create and push a tag
-git tag v1.2.3
-git push origin v1.2.3
+# Push to main/master branch
+git push origin main
 
-# Or create with annotation
-git tag -a v1.2.3 -m "Release version 1.2.3"
-git push origin v1.2.3
+# Semantic-release will:
+# 1. Analyze commits since last release
+# 2. Determine if a release is needed
+# 3. Calculate next version
+# 4. Create tag and release automatically
 ```
 
-### 2. Manual Workflow Dispatch
+**Supported branches:**
+- `main` or `master` - Production releases
+- `next` - Pre-releases for next major version
+- `beta` - Beta pre-releases
+- `alpha` - Alpha pre-releases
+- `N.x` or `N.N.x` - Maintenance releases (e.g., `1.x`, `1.0.x`)
 
-Manually trigger release creation from GitHub Actions UI or API:
+### 2. Manual Trigger (Workflow Dispatch)
+
+Manually trigger the workflow from GitHub Actions UI or CLI:
 
 ```bash
 # Using GitHub CLI
-gh workflow run release.yml -f version=1.2.3
+gh workflow run release.yml
 
-# With options
-gh workflow run release.yml \
-  -f version=1.2.3 \
-  -f prerelease=true \
-  -f draft=true
+# With dry run (no release will be created)
+gh workflow run release.yml -f dry_run=true
 ```
 
-## Semantic Versioning
+## Conventional Commits
 
-The workflow strictly follows [Semantic Versioning 2.0.0](https://semver.org/) specification:
+Semantic-release requires commits to follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.
 
-### Version Format
+### Commit Format
 
 ```
-MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
 ```
 
-- **MAJOR** - Incompatible API changes
-- **MINOR** - Backward-compatible functionality additions
-- **PATCH** - Backward-compatible bug fixes
-- **PRERELEASE** - Optional pre-release identifier (e.g., alpha.1, beta.2, rc.1)
-- **BUILD** - Optional build metadata (e.g., +build.123)
+### Commit Types and Version Impact
 
-### Valid Examples
+| Type | Description | Version Bump | Example |
+|------|-------------|--------------|---------|
+| `feat` | New feature | **MINOR** (1.0.0 → 1.1.0) | `feat: add dark mode support` |
+| `fix` | Bug fix | **PATCH** (1.0.0 → 1.0.1) | `fix: resolve memory leak` |
+| `perf` | Performance improvement | **PATCH** (1.0.0 → 1.0.1) | `perf: optimize database queries` |
+| `BREAKING CHANGE` | Breaking change | **MAJOR** (1.0.0 → 2.0.0) | See below |
+| `docs` | Documentation only | No release | `docs: update README` |
+| `style` | Code style changes | No release | `style: format code` |
+| `refactor` | Code refactoring | **PATCH** (1.0.0 → 1.0.1) | `refactor: simplify auth logic` |
+| `test` | Test changes | No release | `test: add unit tests` |
+| `chore` | Maintenance tasks | No release | `chore: update dependencies` |
+| `ci` | CI/CD changes | No release | `ci: update workflow` |
+| `build` | Build system changes | No release | `build: update webpack config` |
 
-✅ `1.0.0` - Standard release
-✅ `v1.0.0` - With 'v' prefix (automatically stripped)
-✅ `1.2.3-alpha.1` - Pre-release
-✅ `1.2.3-beta.2` - Pre-release
-✅ `1.2.3-rc.1` - Release candidate
-✅ `1.2.3+build.123` - With build metadata
-✅ `1.2.3-alpha.1+build.123` - Pre-release with build metadata
+### Breaking Changes
 
-### Invalid Examples
+Any commit with `BREAKING CHANGE:` in the footer triggers a **MAJOR** version bump:
 
-❌ `1.0` - Missing PATCH version
-❌ `v1.0.0.0` - Too many version segments
-❌ `1.0.0-` - Invalid pre-release format
-❌ `latest` - Not a semver version
+```bash
+feat: redesign authentication API
 
-## Workflow Inputs
+BREAKING CHANGE: The auth endpoint now requires OAuth2 instead of API keys
+```
 
-### Manual Trigger Inputs
+Or using the `!` shorthand:
+
+```bash
+feat!: redesign authentication API
+
+The auth endpoint now requires OAuth2 instead of API keys
+```
+
+### Examples
+
+```bash
+# Minor version bump (new feature)
+git commit -m "feat: add user profile export"
+
+# Patch version bump (bug fix)
+git commit -m "fix: resolve null pointer in user service"
+
+# Major version bump (breaking change)
+git commit -m "feat!: migrate to v2 API
+
+BREAKING CHANGE: All API endpoints now require authentication"
+
+# No release (documentation)
+git commit -m "docs: update installation guide"
+
+# No release (chore)
+git commit -m "chore: update dependencies"
+
+# With scope
+git commit -m "feat(api): add pagination support"
+git commit -m "fix(ui): correct button alignment"
+```
+
+## Workflow Configuration
+
+### Secrets
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `GH_TOKEN` | **Yes** (for workflow_dispatch) | GitHub Personal Access Token or GitHub App token for creating releases |
+
+### Workflow Inputs
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `version` | Yes | - | Version to release (e.g., `1.2.3` or `v1.2.3`) |
-| `prerelease` | No | `false` | Mark as pre-release |
-| `draft` | No | `false` | Create as draft release |
+| `dry_run` | No | `false` | Run in dry-run mode (no release created) |
 
-## Workflow Outputs
+### GitHub Token Setup
 
-The workflow generates the following outputs:
+The workflow requires a `GH_TOKEN` secret for authentication when creating releases.
 
-- **GitHub Release** - Created at `https://github.com/OWNER/REPO/releases/tag/vX.Y.Z`
-- **Changelog** - Automatically generated and grouped by commit type
-- **Discussion** - Created in the Announcements category
+**Setup Instructions:**
 
-## Changelog Generation
+1. **Create a Personal Access Token (PAT):**
+   - Go to GitHub **Settings → Developer settings → Personal access tokens → Tokens (classic)**
+   - Click **Generate new token (classic)**
+   - Set expiration and select scopes:
+     - ✅ `repo` - Full control of private repositories
+     - ✅ `workflow` - Update GitHub Action workflows (if needed)
+     - ✅ `write:packages` - Upload packages (if publishing)
+   - Click **Generate token** and copy it
 
-The workflow automatically generates a changelog by analyzing commits between releases:
+2. **Add as Repository Secret:**
+   - Go to **Repository → Settings → Secrets and variables → Actions**
+   - Click **New repository secret**
+   - Name: `GH_TOKEN`
+   - Value: Paste your token (e.g., `ghp_xxxxxxxxxxxxx`)
+   - Click **Add secret**
 
-### Commit Types
+   Or via GitHub CLI:
+   ```bash
+   gh secret set GH_TOKEN --body "ghp_xxxxxxxxxxxxx"
+   ```
 
-Commits are automatically grouped by conventional commit prefixes:
+3. **Workflow uses it automatically:**
+   - For automatic releases (push to branch): Uses `GH_TOKEN` from repository secrets
+   - For manual releases (workflow_dispatch): Requires `GH_TOKEN` secret input
 
-- **✨ Features** - `feat:` or `feature:`
-- **🐛 Bug Fixes** - `fix:` or `bugfix:`
-- **📚 Documentation** - `docs:` or `doc:`
-- **🔧 Maintenance** - `chore:`
-- **🔄 Other Changes** - Everything else
+**Required token permissions:**
+- `repo` - Full control of repositories (create releases, tags, commit changelog)
+- `workflow` - Update workflows (optional, only if releases trigger other workflows)
+- `write:packages` - Upload packages (optional, only if publishing packages)
+
+## Release Channels
+
+Different branches create releases on different channels:
+
+| Branch | Channel | Pre-release | Version Example |
+|--------|---------|-------------|-----------------|
+| `main` / `master` | Latest (default) | No | `1.0.0` |
+| `next` | Next | Yes | `2.0.0-next.1` |
+| `beta` | Beta | Yes | `1.1.0-beta.1` |
+| `alpha` | Alpha | Yes | `1.1.0-alpha.1` |
+| `1.x` | 1.x | No | `1.2.0` |
+| `1.0.x` | 1.0.x | No | `1.0.3` |
+
+## Generated Changelog
+
+Semantic-release automatically generates categorized changelogs:
 
 ### Example Changelog
 
 ```markdown
-## What's Changed
+# Changelog
+
+## [1.2.0](https://github.com/owner/repo/compare/v1.1.0...v1.2.0) (2024-01-15)
 
 ### ✨ Features
-- feat: add support for PHP 8.4 ([abc123](link))
-- feat: implement new caching strategy ([def456](link))
+* add user authentication ([abc123](commit-link))
+* implement dark mode ([def456](commit-link))
 
 ### 🐛 Bug Fixes
-- fix: resolve memory leak in parser ([ghi789](link))
+* resolve memory leak in parser ([ghi789](commit-link))
+* fix typo in error message ([jkl012](commit-link))
 
 ### 📚 Documentation
-- docs: update installation guide ([jkl012](link))
+* update installation guide ([mno345](commit-link))
 
-### 🔧 Maintenance
-- chore: update dependencies ([mno345](link))
-
-**Full Changelog**: https://github.com/owner/repo/compare/v1.0.0...v1.1.0
+### ♻️ Code Refactoring
+* simplify authentication logic ([pqr678](commit-link))
 ```
 
 ## Usage Examples
 
-### Example 1: Basic Release (Tag Push)
-
-Create a standard release by pushing a tag:
+### Example 1: Feature Release
 
 ```bash
-# Ensure your main branch is up to date
-git checkout main
-git pull origin main
+# Make changes and commit with conventional format
+git commit -m "feat: add export to CSV functionality"
+git push origin main
 
-# Create and push a tag
-git tag v1.0.0
-git push origin v1.0.0
+# Semantic-release will:
+# ✅ Analyze commits
+# ✅ Bump minor version (e.g., 1.0.0 → 1.1.0)
+# ✅ Generate changelog
+# ✅ Create tag v1.1.0
+# ✅ Create GitHub release
+# ✅ Update CHANGELOG.md
 ```
 
-**Result:** Creates release `v1.0.0` with auto-generated changelog
-
-### Example 2: Pre-release (Tag Push)
-
-Create a pre-release version:
+### Example 2: Bug Fix Release
 
 ```bash
-# Create a pre-release tag
-git tag v2.0.0-beta.1
-git push origin v2.0.0-beta.1
+git commit -m "fix: resolve authentication timeout"
+git push origin main
+
+# Result: Patch version bump (e.g., 1.1.0 → 1.1.1)
 ```
 
-**Result:** Creates pre-release `v2.0.0-beta.1` (automatically detected as pre-release)
-
-### Example 3: Manual Release (Workflow Dispatch)
-
-Trigger release creation manually from GitHub:
-
-1. Go to **Actions** → **Release** workflow
-2. Click **Run workflow**
-3. Fill in the inputs:
-   - Version: `1.2.3`
-   - Pre-release: ☐ (unchecked)
-   - Draft: ☐ (unchecked)
-4. Click **Run workflow**
-
-### Example 4: Draft Release (Workflow Dispatch)
-
-Create a draft release for review before publishing:
+### Example 3: Breaking Change Release
 
 ```bash
-gh workflow run release.yml \
-  -f version=1.3.0 \
-  -f draft=true
+git commit -m "feat!: redesign API endpoints
+
+BREAKING CHANGE: All endpoints now use /v2/ prefix"
+git push origin main
+
+# Result: Major version bump (e.g., 1.1.1 → 2.0.0)
 ```
 
-**Result:** Creates draft release `v1.3.0` that requires manual publishing
-
-### Example 5: Pre-release with Draft (Workflow Dispatch)
-
-Create a draft pre-release:
+### Example 4: Multiple Commits
 
 ```bash
-gh workflow run release.yml \
-  -f version=2.0.0-rc.1 \
-  -f prerelease=true \
-  -f draft=true
+git commit -m "feat: add search functionality"
+git commit -m "feat: add filtering options"
+git commit -m "fix: correct search highlighting"
+git push origin main
+
+# Result: Minor version bump (1.0.0 → 1.1.0)
+# Changelog includes all three commits
 ```
 
-**Result:** Creates draft pre-release `v2.0.0-rc.1`
+### Example 5: Pre-release (Beta)
+
+```bash
+# Create and push to beta branch
+git checkout -b beta
+git commit -m "feat: experimental feature"
+git push origin beta
+
+# Result: Beta pre-release (e.g., 1.1.0-beta.1)
+```
+
+### Example 6: Maintenance Release
+
+```bash
+# Create maintenance branch for version 1.x
+git checkout -b 1.x
+git commit -m "fix: backport security fix"
+git push origin 1.x
+
+# Result: Patch on 1.x line (e.g., 1.5.0 → 1.5.1)
+```
+
+### Example 7: Dry Run
+
+```bash
+# Test what would be released without creating actual release
+gh workflow run release-reusable.yml -f dry_run=true
+
+# Check workflow output to see:
+# - What version would be created
+# - What commits would be included
+# - Generated changelog preview
+```
+
+### Example 8: No Release Needed
+
+```bash
+# Only non-release commits
+git commit -m "docs: update README"
+git commit -m "chore: update dependencies"
+git push origin main
+
+# Result: No release created (documentation and chores don't trigger releases)
+```
 
 ## Release Workflow Process
 
 ```mermaid
 graph TD
-    A[Trigger: Tag Push or Manual] --> B[Validate Version]
-    B --> C{Valid Semver?}
-    C -->|No| D[❌ Fail: Invalid Version]
-    C -->|Yes| E[Detect Pre-release]
-    E --> F[Generate Changelog]
-    F --> G[Group Commits by Type]
-    G --> H[Create GitHub Release]
-    H --> I[Create Discussion]
-    I --> J[✅ Release Published]
+    A[Push to Release Branch] --> B[Checkout Code]
+    B --> C[Setup Node.js]
+    C --> D[Determine GitHub Token]
+    D --> E[Run Semantic Release]
+    E --> F[Analyze Commits]
+    F --> G{Release Needed?}
+    G -->|No| H[No Release - Skip]
+    G -->|Yes| I[Calculate Next Version]
+    I --> J[Generate Changelog]
+    J --> K[Create Git Tag]
+    K --> L[Update CHANGELOG.md]
+    L --> M[Commit Changes]
+    M --> N[Create GitHub Release]
+    N --> O[✅ Release Published]
+    H --> P[ℹ️ Workflow Complete]
+```
+
+## Configuration
+
+The workflow uses `.releaserc.json` for configuration:
+
+### Default Configuration
+
+```json
+{
+  "branches": ["main", "master", "next", "beta", "alpha"],
+  "preset": "conventionalcommits",
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    "@semantic-release/changelog",
+    "@semantic-release/github",
+    "@semantic-release/git"
+  ]
+}
+```
+
+### Customization
+
+You can customize by modifying `.releaserc.json`:
+
+```json
+{
+  "branches": [
+    "main",
+    {"name": "develop", "prerelease": true}
+  ],
+  "plugins": [
+    ["@semantic-release/commit-analyzer", {
+      "releaseRules": [
+        {"type": "docs", "scope": "README", "release": "patch"}
+      ]
+    }],
+    "@semantic-release/release-notes-generator",
+    "@semantic-release/changelog",
+    "@semantic-release/github",
+    "@semantic-release/git"
+  ]
+}
 ```
 
 ## Best Practices
 
-### 1. Use Conventional Commits
+### 1. Always Use Conventional Commits
 
-Follow [Conventional Commits](https://www.conventionalcommits.org/) for better changelog generation:
+Every commit should follow the conventional format:
 
 ```bash
-git commit -m "feat: add new authentication method"
-git commit -m "fix: resolve null pointer exception"
+# ✅ Good
+git commit -m "feat: add user authentication"
+git commit -m "fix: resolve login timeout"
 git commit -m "docs: update API documentation"
-git commit -m "chore: update dependencies"
+
+# ❌ Bad
+git commit -m "added authentication"
+git commit -m "bug fix"
+git commit -m "updates"
 ```
 
-### 2. Version Bumping Guidelines
+### 2. Use Meaningful Scopes
 
-Follow semantic versioning rules:
-
-- **MAJOR** (1.0.0 → 2.0.0) - Breaking changes
-- **MINOR** (1.0.0 → 1.1.0) - New features (backward-compatible)
-- **PATCH** (1.0.0 → 1.0.1) - Bug fixes (backward-compatible)
-
-### 3. Pre-release Workflow
-
-Use pre-releases for testing:
+Scopes help organize changes:
 
 ```bash
-# Alpha release
-git tag v2.0.0-alpha.1
-git push origin v2.0.0-alpha.1
-
-# Beta release
-git tag v2.0.0-beta.1
-git push origin v2.0.0-beta.1
-
-# Release candidate
-git tag v2.0.0-rc.1
-git push origin v2.0.0-rc.1
-
-# Final release
-git tag v2.0.0
-git push origin v2.0.0
+git commit -m "feat(auth): add OAuth2 support"
+git commit -m "fix(api): correct validation logic"
+git commit -m "docs(readme): add installation steps"
 ```
 
-### 4. Protected Tags
+### 3. Write Clear Commit Bodies
 
-Consider protecting version tags in your repository settings:
-
-- Go to **Settings** → **Tags**
-- Add rule: `v*.*.*`
-- Restrict tag creation to specific roles
-
-### 5. Automated Version Bumping
-
-Consider using tools to automate version bumping:
+For complex changes, add detailed descriptions:
 
 ```bash
-# Using npm version (if package.json exists)
-npm version patch  # 1.0.0 → 1.0.1
-npm version minor  # 1.0.0 → 1.1.0
-npm version major  # 1.0.0 → 2.0.0
-git push --follow-tags
+git commit -m "feat: add advanced search
 
-# Using semantic-release (automated)
-npm install --save-dev semantic-release
+- Implemented full-text search
+- Added filter by date range
+- Added sort options"
+```
+
+### 4. Test with Dry Run
+
+Before merging to main, test the release:
+
+```bash
+gh workflow run release.yml -f dry_run=true
+```
+
+### 5. Use Pre-release Branches
+
+Test major changes in beta/alpha before releasing:
+
+```bash
+# Develop in beta branch
+git checkout -b beta
+git commit -m "feat: experimental feature"
+git push origin beta  # Creates beta pre-release
+
+# When stable, merge to main
+git checkout main
+git merge beta
+git push origin main  # Creates stable release
+```
+
+### 6. Protect Release Branches
+
+Configure branch protection for `main`/`master`:
+- Require pull request reviews
+- Require status checks to pass
+- Enable conventional commit linting
+
+### 7. Use Commit Linting
+
+Install commitlint to enforce conventional commits:
+
+```bash
+npm install --save-dev @commitlint/config-conventional @commitlint/cli
 ```
 
 ## Permissions Required
@@ -287,81 +473,249 @@ The workflow requires the following permissions:
 
 ```yaml
 permissions:
-  contents: write      # Create releases and tags
+  contents: write      # Create releases, tags, and commit changelog
+  issues: write        # Comment on issues
+  pull-requests: write # Comment on PRs
   discussions: write   # Create release discussions
 ```
 
-These are automatically granted when using `GITHUB_TOKEN`.
+### GitHub Token (`GH_TOKEN`)
+
+The workflow uses the `GH_TOKEN` repository secret for all release operations.
+
+**Why use `GH_TOKEN` instead of default `GITHUB_TOKEN`?**
+- ✅ Can trigger other workflow runs (default `GITHUB_TOKEN` cannot)
+- ✅ Access to organization-level resources
+- ✅ Can bypass branch protection rules if needed
+- ✅ Fine-grained control over permissions
+- ✅ No limitations on cross-repository operations
+
+**Token Scopes Required:**
+- `repo` - Full control of repositories (required)
+- `workflow` - Update workflows (optional, enables triggering other workflows)
+- `write:packages` - Upload packages (optional, only if publishing packages)
 
 ## Troubleshooting
 
-### Issue: "Version does not follow semantic versioning"
+### Issue: "No release published"
 
-**Cause:** The provided version doesn't match semver format
-
-**Solution:** Ensure version follows `MAJOR.MINOR.PATCH` format:
-```bash
-# ❌ Invalid
-git tag 1.0
-git tag v1.0.0.0
-
-# ✅ Valid
-git tag v1.0.0
-```
-
-### Issue: "No previous tag found"
-
-**Cause:** This is the first release in the repository
-
-**Solution:** This is normal behavior. The workflow will include all commits in the changelog.
-
-### Issue: "Release already exists"
-
-**Cause:** A release with this tag already exists
+**Cause:** No commits with release-triggering types since last release
 
 **Solution:**
-- Delete the existing tag and release:
+- Ensure commits use proper conventional format
+- Check that commits are `feat`, `fix`, or have `BREAKING CHANGE`
+- Review commit types that trigger releases (not `docs`, `chore`, `test`)
+
+```bash
+# Check commits since last release
+git log $(git describe --tags --abbrev=0)..HEAD --oneline
+
+# Ensure at least one commit is feat/fix/breaking
+```
+
+### Issue: "Invalid commit message format"
+
+**Cause:** Commits don't follow Conventional Commits specification
+
+**Solution:**
+- Use format: `type(scope): subject`
+- Valid types: feat, fix, docs, style, refactor, perf, test, chore, ci, build
+- Examples:
   ```bash
-  git tag -d v1.0.0
-  git push origin :refs/tags/v1.0.0
-  gh release delete v1.0.0 --yes
+  git commit -m "feat: add new feature"
+  git commit -m "fix(auth): resolve login issue"
   ```
-- Use a different version number
 
 ### Issue: "Permission denied when creating release"
 
-**Cause:** Insufficient permissions for the workflow
+**Cause:** Missing or insufficient `GH_TOKEN` permissions
 
 **Solution:**
-- Ensure repository settings allow Actions to create releases
-- Go to **Settings** → **Actions** → **General**
-- Under "Workflow permissions", select "Read and write permissions"
+1. Verify `GH_TOKEN` secret exists:
+   ```bash
+   # Check if secret is configured
+   gh secret list | grep GH_TOKEN
+   ```
 
-### Issue: "Changelog is empty or incorrect"
+2. Ensure token has required scopes:
+   - Go to GitHub **Settings → Developer settings → Personal access tokens**
+   - Find your token and verify it has `repo` scope
+   - If not, create a new token with proper scopes
 
-**Cause:** No commits between previous and current tag, or commits don't follow conventional format
+3. Update the secret:
+   ```bash
+   # Via GitHub CLI
+   gh secret set GH_TOKEN --body "ghp_your_new_token_here"
+   ```
+
+4. Check repository workflow permissions:
+   - Go to **Repository → Settings → Actions → General**
+   - Under "Workflow permissions", ensure proper access is granted
+
+### Issue: "Wrong version number generated"
+
+**Cause:** Incorrect commit type or missing breaking change notation
 
 **Solution:**
-- Ensure commits exist between tags
-- Use conventional commit messages for better grouping
-- Check that the previous tag reference is correct
+- Use `feat:` for minor bumps (1.0.0 → 1.1.0)
+- Use `fix:` for patch bumps (1.0.0 → 1.0.1)
+- Use `BREAKING CHANGE:` for major bumps (1.0.0 → 2.0.0)
+- Check `.releaserc.json` configuration
+
+### Issue: "CHANGELOG.md conflicts"
+
+**Cause:** Local CHANGELOG.md differs from auto-generated version
+
+**Solution:**
+- Don't manually edit CHANGELOG.md (semantic-release manages it)
+- Pull latest changes before pushing:
+  ```bash
+  git pull --rebase origin main
+  ```
+- If conflicts persist, delete local CHANGELOG.md and let semantic-release regenerate
+
+### Issue: "Release already exists for this tag"
+
+**Cause:** Tag already exists (workflow is idempotent and will skip)
+
+**Solution:**
+- This is normal behavior - semantic-release won't create duplicates
+- If you need to recreate, delete the tag and release first:
+  ```bash
+  gh release delete v1.0.0 --yes
+  git tag -d v1.0.0
+  git push origin :refs/tags/v1.0.0
+  ```
 
 ## Advanced Configuration
 
-### Custom Changelog Format
+### Using GitHub App Tokens
 
-If you need a custom changelog format, you can modify the workflow:
+For organizations, you can use a GitHub App token instead of a Personal Access Token:
 
-```yaml
-- name: Generate changelog
-  run: |
-    # Your custom changelog generation logic
-    git log --pretty=format:"* %s (%an)" > CHANGELOG.md
+**Benefits of GitHub App tokens:**
+- ✅ Better rate limits (5,000 requests/hour vs 1,000 for PAT)
+- ✅ More granular permissions
+- ✅ Better audit trail
+- ✅ Automatic rotation
+- ✅ Organization-wide management
+
+**Setup:**
+
+1. **Create a GitHub App:**
+   - Go to **Organization Settings → Developer settings → GitHub Apps**
+   - Click **New GitHub App**
+   - Set name and permissions:
+     - Repository permissions:
+       - Contents: Read and write
+       - Pull requests: Read and write
+       - Issues: Read and write
+       - Metadata: Read-only
+   - Generate and download private key
+
+2. **Install App on Repository:**
+   - Install the app on your repository
+   - Note the App ID and Installation ID
+
+3. **Add App Credentials as Secrets:**
+   ```bash
+   gh secret set APP_ID --body "123456"
+   gh secret set APP_PRIVATE_KEY < private-key.pem
+   ```
+
+4. **Modify Workflow to Generate Token:**
+
+   You'll need to modify the `.github/workflows/release-reusable.yml` file:
+
+   ```yaml
+   jobs:
+     release:
+       name: Semantic Release
+       runs-on: ubuntu-latest
+       steps:
+         - name: Checkout code
+           uses: actions/checkout@v4
+           with:
+             fetch-depth: 0
+             persist-credentials: false
+
+         - name: Generate GitHub App Token
+           id: generate_token
+           uses: tibdex/github-app-token@v2
+           with:
+             app_id: ${{ secrets.APP_ID }}
+             private_key: ${{ secrets.APP_PRIVATE_KEY }}
+
+         - name: Setup Node.js
+           uses: actions/setup-node@v4
+           with:
+             node-version: 'lts/*'
+
+         - name: Semantic Release
+           uses: cycjimmy/semantic-release-action@v4
+           with:
+             extra_plugins: |
+               @semantic-release/changelog@6.0.3
+               @semantic-release/git@10.0.1
+               conventional-changelog-conventionalcommits@7.0.2
+           env:
+             GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+   ```
+
+### Fine-Grained Personal Access Tokens
+
+For better security, use fine-grained tokens (beta):
+
+1. **Create Fine-Grained Token:**
+   - Go to **Settings → Developer settings → Personal access tokens → Fine-grained tokens**
+   - Click **Generate new token**
+   - Set repository access (only repositories you need)
+   - Set permissions:
+     - Contents: Read and write
+     - Pull requests: Read and write
+     - Issues: Read and write
+   - Set expiration (recommended: 90 days with auto-renewal reminder)
+
+2. **Add as Secret:**
+   ```bash
+   gh secret set GH_TOKEN --body "github_pat_xxxxxxxxxxxxx"
+   ```
+
+### Custom Release Rules
+
+Modify `.releaserc.json` to customize version bump rules:
+
+```json
+{
+  "plugins": [
+    ["@semantic-release/commit-analyzer", {
+      "releaseRules": [
+        {"type": "docs", "scope": "README", "release": "patch"},
+        {"type": "refactor", "release": "patch"},
+        {"type": "style", "release": "patch"}
+      ]
+    }]
+  ]
+}
+```
+
+### Disable Changelog File
+
+Remove changelog plugin if you don't want CHANGELOG.md:
+
+```json
+{
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    "@semantic-release/github"
+  ]
+}
 ```
 
 ### Integration with Other Workflows
 
-Trigger other workflows after release:
+Trigger deployments after release:
 
 ```yaml
 # In another workflow file
@@ -374,47 +728,58 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to production
-        run: echo "Deploying ${{ github.event.release.tag_name }}"
+        run: |
+          echo "Deploying version ${{ github.event.release.tag_name }}"
 ```
 
-### Automatic Tagging from CI
+### Monorepo Support
 
-Create tags automatically in your CI pipeline:
+For monorepos, use separate configurations per package:
 
-```yaml
-# In your main CI workflow
-- name: Create tag
-  if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-  run: |
-    VERSION=$(cat version.txt)
-    git tag "v${VERSION}"
-    git push origin "v${VERSION}"
+```bash
+# In each package directory
+packages/
+  package-a/
+    .releaserc.json
+  package-b/
+    .releaserc.json
 ```
+
+## Migration from Manual Releases
+
+If migrating from manual versioning:
+
+1. **Create Initial Release**
+   ```bash
+   # Create a base tag for semantic-release to work from
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+
+2. **Start Using Conventional Commits**
+   ```bash
+   # All new commits should follow convention
+   git commit -m "feat: add new feature"
+   ```
+
+3. **Run First Automated Release**
+   ```bash
+   git push origin main
+   # Semantic-release will handle the rest
+   ```
 
 ## References
 
-- [Semantic Versioning 2.0.0](https://semver.org/)
-- [Conventional Commits](https://www.conventionalcommits.org/)
-- [GitHub Releases Documentation](https://docs.github.com/en/repositories/releasing-projects-on-github)
-- [softprops/action-gh-release](https://github.com/softprops/action-gh-release)
-
-## Examples from MacPaw
-
-While MacPaw's repositories don't currently use a centralized release workflow, this workflow follows GitHub Actions best practices and can be used across any repository requiring semantic versioning and automated releases.
-
-## Contributing
-
-When updating the release workflow:
-
-1. Test with draft releases first
-2. Validate changelog generation accuracy
-3. Update documentation to reflect changes
-4. Test both tag push and manual triggers
-5. Verify pre-release detection logic
+- [Semantic Release Documentation](https://semantic-release.gitbook.io/)
+- [Conventional Commits Specification](https://www.conventionalcommits.org/)
+- [cycjimmy/semantic-release-action](https://github.com/cycjimmy/semantic-release-action)
+- [Semantic Release Plugins](https://semantic-release.gitbook.io/semantic-release/extending/plugins-list)
+- [Commit Message Guidelines](https://github.com/angular/angular/blob/master/CONTRIBUTING.md#commit)
 
 ## Support
 
 For issues or questions:
-- Open an issue in this repository
-- Check the troubleshooting section above
+- Check the [semantic-release troubleshooting guide](https://semantic-release.gitbook.io/semantic-release/support/troubleshooting)
 - Review GitHub Actions logs for detailed error messages
+- Open an issue in this repository
+- Consult the [Conventional Commits FAQ](https://www.conventionalcommits.org/en/v1.0.0/#faq)

@@ -21,7 +21,7 @@ This workflow automates the complete CI process for Symfony PHP projects:
 
 | Input | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `versions-matrix` | string (JSON object) | ❌ | `{"php": ["8.2", "8.3", "8.4"], "symfony/framework-bundle": ["6.4.*", "7.0.*", "7.3.*"]}` | JSON object with package versions to test. Format: `{"php": [...], "package/name": [...]}` |
+| `versions-matrix` | string (JSON object) | ❌ | `{"php": ["8.2", "8.3", "8.4"], "symfony/framework-bundle": ["6.4.*", "7.0.*", "7.3.*"]}` | JSON object with versions to test. Must contain `php` key with PHP versions. Other keys are Composer packages. |
 | `enable-code-coverage` | boolean | ❌ | `true` | Enable code coverage reporting |
 | `enable-phpstan` | boolean | ❌ | `true` | Enable PHPStan static analysis |
 | `enable-phpcs` | boolean | ❌ | `true` | Enable PHP_CodeSniffer |
@@ -48,7 +48,7 @@ This workflow automates the complete CI process for Symfony PHP projects:
 
 | Secret | Required | Description |
 |--------|----------|-------------|
-| `codecov-token` | ❌ | Codecov token for coverage upload |
+| `CODECOV_TOKEN` | ❌ | Codecov token for coverage upload |
 
 ## 🚀 Usage
 
@@ -75,7 +75,7 @@ jobs:
       enable-phpstan: true
       enable-phpcs: true
     secrets:
-      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 ```
 
 ### Minimal Setup (Only Tests + PHPStan)
@@ -140,7 +140,7 @@ jobs:
       phpstan-level: 'max'
       php-extensions: 'mbstring, json, xml, curl, redis'
     secrets:
-      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 ```
 
 ### Extended Version Matrix (Legacy Support)
@@ -165,7 +165,7 @@ jobs:
       enable-phpcs: true
       test-lowest-dependencies: true
     secrets:
-      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 ```
 
 ### Testing Multiple Symfony Packages
@@ -191,7 +191,7 @@ jobs:
       enable-phpstan: true
       enable-phpcs: true
     secrets:
-      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 ```
 
 ### Testing with Doctrine ORM
@@ -243,6 +243,31 @@ jobs:
         ]
       enable-phpstan: true
       enable-phpcs: true
+```
+
+### Custom Matrix Include (add coverage and lowest deps)
+
+```yaml
+name: Matrix Include Example
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    uses: MacPaw/github-actions/.github/workflows/symfony-php-reusable.yml@main
+    with:
+      versions-matrix: |
+        {
+          "php": ["8.2", "8.3"],
+          "symfony/framework-bundle": ["6.4.*"]
+        }
+      # Add an extra leg with lowest dependencies and coverage enabled
+      matrix-include: '[
+        {"php":"8.2","dependencies":"lowest","coverage":"xdebug"}
+      ]'
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 ```
 
 ### No Exclusions (Test All Combinations)
@@ -299,7 +324,7 @@ jobs:
       infection-min-msi: 85
       infection-min-covered-msi: 95
     secrets:
-      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 ```
 
 ## 🔄 Workflow Diagram
@@ -553,7 +578,7 @@ with:
 ### 📊 Matrix Examples
 
 **Example 1: Basic Symfony Testing**
-```yaml
+```text
 # Input:
 versions-matrix: |
   {
@@ -577,7 +602,7 @@ versions-matrix: |
 ```
 
 **Example 2: Multiple Packages**
-```yaml
+```text
 # Input:
 versions-matrix: |
   {
@@ -596,7 +621,7 @@ versions-matrix: |
 ```
 
 **Example 3: PHP Only (No Package Constraints)**
-```yaml
+```text
 # Input:
 versions-matrix: |
   {
@@ -927,7 +952,7 @@ To add a new quality tool:
 
 ### 1. **Start Minimal**
 Begin with basic configuration and enable tools progressively:
-```yaml
+```text
 # Phase 1: Testing only
 enable-phpstan: true
 enable-phpcs: false

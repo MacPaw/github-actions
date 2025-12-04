@@ -10,6 +10,11 @@ on:
         description: 'API key for Infection badge (optional)'
         required: false
     inputs:
+      matrix-include:
+        description: 'JSON array of additional matrix include items (e.g. [{"php":"8.4","dependencies":"lowest","coverage":"xdebug"}])'
+        required: false
+        type: string
+        default: '[]'
       versions-matrix:
         description: 'JSON object with package versions to test. Format: {"php": ["8.2", "8.3"], "symfony/framework-bundle": ["6.4.*", "7.0.*"], "package/name": ["1.0.*"]}'
         required: false
@@ -370,14 +375,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ${{ fromJson(inputs['versions-matrix']).php }}
+        php: ${{ (fromJSON(inputs['versions-matrix']))['php'] }}
         dependencies: ['highest']
-        versions-matrix: ['${{ inputs["versions-matrix"] }}']
-        include:
-          - php: ${{ fromJson(inputs['versions-matrix']).php[0] }}
-            dependencies: 'lowest'
-            coverage: ${{ inputs['enable-code-coverage'] && 'xdebug' || 'none' }}
-            versions-matrix: '${{ inputs["versions-matrix"] }}'
+        include: ${{ fromJson(inputs['matrix-include']) }}
         exclude: ${{ fromJson(inputs['matrix-exclude']) }}
 
     steps:
@@ -408,7 +408,7 @@ jobs:
         run: |
           # Parse versions-matrix and apply constraints for all packages except PHP
           echo "Applying version constraints from matrix..."
-          VERSIONS_JSON='${{ matrix["versions-matrix"] }}'
+          VERSIONS_JSON='${{ inputs['versions-matrix'] }}'
 
           # Extract and apply Symfony constraint if present
           SYMFONY_VERSION=$(echo "$VERSIONS_JSON" | jq -r '."symfony/framework-bundle"[0] // empty')

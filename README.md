@@ -22,13 +22,16 @@ All reusable workflows are located in `.github/workflows` folder
   - ⚡ **Performance Optimized** - Parallel execution, intelligent caching
   - [📚 Detailed Documentation](docs/workflows/symfony-php-reusable.md)
 
-- [release.yml](.github/workflows/release.yml) - Automated release workflow with semantic versioning
-  - ✅ **Semantic Versioning** - Strict semver validation (MAJOR.MINOR.PATCH)
-  - 📝 **Automatic Changelog** - Grouped by commit types (features, fixes, docs)
-  - 🏷️ **Pre-release Support** - Auto-detection or manual specification
-  - 📦 **Draft Releases** - Create draft releases for review
-  - 🔄 **Multiple Triggers** - Tag push or manual workflow dispatch
-  - 💬 **Discussion Integration** - Automatic discussion creation
+- [release-reusable.yml](.github/workflows/release-reusable.yml) - Fully automated release workflow using semantic-release
+  - 🤖 **Fully Automated** - No manual version bumping or changelog writing required
+  - ✅ **Semantic Versioning** - Automatic version calculation from commit messages
+  - 🏷️ **Auto Tag & Release** - Automatically creates tags and GitHub releases
+  - 📝 **Auto-Generated Changelogs** - Beautiful, categorized release notes
+  - 🎯 **Conventional Commits** - Based on conventional commit standards
+  - 🔀 **Multi-Branch Support** - main/master, next, beta, alpha, maintenance branches
+  - 🛡️ **Safe & Idempotent** - Won't create duplicate releases
+  - 🧪 **Dry Run Mode** - Test releases without publishing
+  - 🔑 **Secure Authentication** - Uses GH_TOKEN repository secret for release operations
   - [📚 Detailed Documentation](docs/workflows/release.md)
 
 ### Documentation
@@ -44,16 +47,22 @@ All reusable workflows are located in `.github/workflows` folder
   - 📊 Analysis of MacPaw's Symfony repositories
   - 📈 Best practices and recommendations
 
-- [Release Workflow](docs/workflows/release.md) - Complete release workflow documentation with:
-  - 📦 Semantic versioning guidelines and validation
-  - 🚀 Multiple usage examples (tag push, manual, pre-release, draft)
-  - 📝 Automatic changelog generation and formatting
-  - 🏷️ Pre-release detection and handling
-  - 🔄 Workflow process and diagrams
-  - ⚙️ Configuration options and inputs
-  - 🔧 Troubleshooting guide
-  - 📋 Best practices and conventional commits
-  - 🛠️ Advanced configuration examples
+- [Release Workflow](docs/workflows/release.md) - Complete semantic-release documentation with:
+  - 🤖 Fully automated release process using semantic-release
+  - 📝 Conventional commits specification and examples
+  - 🏷️ Automatic version calculation (feat → minor, fix → patch, BREAKING → major)
+  - 🚀 Multiple usage examples (feature, bugfix, breaking changes, pre-releases)
+  - 🔀 Multi-branch release channels (main, beta, alpha, maintenance)
+  - 📊 Auto-generated categorized changelogs
+  - 🧪 Dry run mode for testing releases
+  - 🔑 GH_TOKEN secret configuration and setup guide
+  - 🔐 GitHub App token support for organizations
+  - 🎯 Fine-grained Personal Access Token (PAT) instructions
+  - ⚙️ Configuration via .releaserc.json
+  - 🔧 Comprehensive troubleshooting guide
+  - 📋 Best practices for conventional commits
+  - 🛠️ Advanced configuration and customization examples
+  - 🔄 Migration guide from manual releases
 
 ### Contributing
 
