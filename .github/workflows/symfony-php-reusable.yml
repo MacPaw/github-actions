@@ -2,6 +2,7 @@ name: Symfony PHP Reusable Workflow
 
 on:
   workflow_call:
+
     secrets:
       CODECOV_TOKEN:
         description: 'Token for Codecov uploads (optional)'
@@ -9,6 +10,7 @@ on:
       INFECTION_BADGE_API_KEY:
         description: 'API key for Infection badge (optional)'
         required: false
+
     inputs:
       matrix-include:
         description: |
@@ -36,11 +38,6 @@ on:
             "php": ["8.2", "8.3", "8.4"],
             "symfony/framework-bundle": ["6.4.*", "7.0.*", "7.3.*"]
           }
-      enable-code-coverage:
-        description: 'Enable code coverage reporting'
-        required: false
-        type: boolean
-        default: true
       enable-phpstan:
         description: 'Enable PHPStan static analysis'
         required: false
@@ -76,11 +73,21 @@ on:
         required: false
         type: boolean
         default: true
-      test-lowest-dependencies:
-        description: 'Test with lowest dependencies'
+      enable-coverage-check:
+        description: 'Enable coverage validation and PR comments'
         required: false
         type: boolean
         default: false
+      coverage-threshold:
+        description: 'Minimum code coverage percentage required (0-100)'
+        required: false
+        type: number
+        default: 70
+      coverage-file:
+        description: 'Coverage file name (Clover XML format)'
+        required: false
+        type: string
+        default: 'coverage.xml'
       phpstan-level:
         description: 'PHPStan level (0-9 or max)'
         required: false
@@ -96,6 +103,11 @@ on:
         required: false
         type: string
         default: 'mbstring, json'
+      php-version-quality-tools:
+        description: 'PHP version to use for quality tools (PHPStan, PHPCS, Rector, Infection, etc.)'
+        required: false
+        type: string
+        default: '8.3'
       matrix-exclude:
         description: 'JSON array of matrix combinations to exclude (e.g. [{"php": "8.1", "symfony/framework-bundle": "7.0.*"}]). Default excludes Symfony 7.x with PHP < 8.2'
         required: false
@@ -160,6 +172,8 @@ env:
   COMPOSER_ROOT_VERSION: "1.0.0"
 
 jobs:
+
+
   commitlint:
     name: Commit Lint
     runs-on: ubuntu-latest
@@ -210,12 +224,13 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: ${{ inputs['php-version-quality-tools'] }}
           coverage: none
 
       - name: Validate composer.json and composer.lock
         working-directory: ${{ inputs['working-directory'] }}
         run: composer validate --strict --no-check-publish
+
 
   phpcs:
     name: PHP_CodeSniffer
@@ -229,9 +244,9 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: ${{ inputs['php-version-quality-tools'] }}
           coverage: none
-          extensions: ${{ inputs['php-extensions'] }}
+          extensions: ${{ inputs['php-extensions'] }} xdebug
 
       - name: Get Composer cache directory
         id: composer-cache
@@ -271,7 +286,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: ${{ inputs['php-version-quality-tools'] }}
           coverage: none
           extensions: ${{ inputs['php-extensions'] }}
 
@@ -313,7 +328,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: ${{ inputs['php-version-quality-tools'] }}
           coverage: none
           extensions: ${{ inputs['php-extensions'] }}
 
@@ -355,7 +370,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: ${{ inputs['php-version-quality-tools'] }}
           coverage: none
           extensions: ${{ inputs['php-extensions'] }}
 
@@ -486,6 +501,7 @@ jobs:
           echo "Generated matrix:"
           echo '${{ steps.generate.outputs.matrix }}' | jq .
 
+
   unit-tests:
     name: Unit Tests (${{ matrix.title }})
     runs-on: ubuntu-latest
@@ -506,7 +522,7 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           coverage: ${{ matrix.coverage || 'none' }}
-          extensions: ${{ inputs['php-extensions'] }}
+          extensions: ${{ inputs['php-extensions'] }}${{ matrix.coverage == 'xdebug' && ', xdebug' || '' }}
 
       - name: Get Composer cache directory
         id: composer-cache
@@ -526,6 +542,7 @@ jobs:
           echo '${{ toJSON(matrix) }}' | jq .
 
       - name: Apply package version constraints from matrix
+        id: apply-constraints
         working-directory: ${{ inputs.working-directory }}
         run: |
           echo "Applying package version constraints from matrix combination..."
@@ -535,6 +552,10 @@ jobs:
 
           # Extract and apply each package version from matrix
           # Skip system keys: php, dependencies, coverage, title, description
+          PACKAGES_STR=""
+          PACKAGES_JSON="{}"
+          SYMFONY_VERSION=""
+
           for package in $(echo "$MATRIX_JSON" | jq -r 'keys[]' | grep -v -E '^(php|dependencies|coverage|title|description)$'); do
             VERSION=$(echo "$MATRIX_JSON" | jq -r --arg pkg "$package" '.[$pkg]')
 
@@ -546,39 +567,236 @@ jobs:
               if [ "$package" = "symfony/framework-bundle" ]; then
                 echo "Setting Symfony global version constraint"
                 composer config extra.symfony.require "$VERSION" || true
+                SYMFONY_VERSION="$VERSION"
               fi
+
+              # Build outputs
+              if [ -z "$PACKAGES_STR" ]; then
+                PACKAGES_STR="$package:$VERSION"
+              else
+                PACKAGES_STR="$PACKAGES_STR $package:$VERSION"
+              fi
+              PACKAGES_JSON=$(echo "$PACKAGES_JSON" | jq --arg k "$package" --arg v "$VERSION" '. + {($k): $v}')
             fi
           done
 
+          # If Symfony version wasn't set via framework-bundle, try to infer from any symfony/* package in the matrix
+          if [ -z "$SYMFONY_VERSION" ]; then
+            SYMFONY_VERSION=$(echo "$MATRIX_JSON" | jq -r 'to_entries | map(select(.key|test("^symfony/"))) | (.[0].value // "")')
+            if [ -n "$SYMFONY_VERSION" ]; then
+              echo "Inferred Symfony version $SYMFONY_VERSION from symfony/* package; setting extra.symfony.require"
+              composer config extra.symfony.require "$SYMFONY_VERSION" || true
+            fi
+          fi
+
           echo "✓ Package version constraints applied successfully"
 
-      - name: Install dependencies (highest)
-        if: matrix.dependencies == 'highest'
-        working-directory: ${{ inputs['working-directory'] }}
-        run: composer update --no-interaction --no-progress --prefer-dist
+          # Export step outputs
+          echo "composer_packages=$PACKAGES_STR" >> "$GITHUB_OUTPUT"
+          echo "composer_packages_json=$(echo "$PACKAGES_JSON" | jq -c '.')" >> "$GITHUB_OUTPUT"
+          echo "symfony_version=$SYMFONY_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Install dependencies (lowest)
-        if: matrix.dependencies == 'lowest'
+      - name: Install dependencies
         working-directory: ${{ inputs['working-directory'] }}
-        run: composer update --no-interaction --no-progress --prefer-dist --prefer-lowest --prefer-stable
+        run: |
+          echo "Requested constraints: ${{ steps.apply-constraints.outputs.composer_packages }}"
+          if [ "${{ matrix.dependencies }}" = "lowest" ]; then
+            echo "Installing lowest compatible dependencies..."
+            composer update --prefer-lowest --prefer-stable --no-interaction --no-progress
+          else
+            echo "Installing highest (locked) dependencies..."
+            composer update --no-interaction --no-progress --prefer-dist
+          fi
 
       - name: Run PHPUnit
         if: matrix.coverage != 'xdebug'
         working-directory: ${{ inputs['working-directory'] }}
-        run: vendor/bin/phpunit --testdox
+        run: vendor/bin/phpunit --testdox --no-coverage
 
       - name: Run PHPUnit with coverage
         if: matrix.coverage == 'xdebug'
         working-directory: ${{ inputs['working-directory'] }}
-        run: vendor/bin/phpunit --testdox --coverage-clover=coverage.xml
+        run: |
+          # Generate both Clover XML (for Codecov and fallback) and raw PHP coverage (for phpcov merge)
+          vendor/bin/phpunit \
+            --testdox \
+            --coverage-clover=${{ inputs['coverage-file'] }} \
+            --coverage-php=coverage.cov
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         if: matrix.coverage == 'xdebug' && env.CODECOV_TOKEN != ''
         with:
           token: ${{ env.CODECOV_TOKEN }}
-          files: ${{ inputs['working-directory'] }}/coverage.xml
+          files: ${{ inputs['working-directory'] }}/${{ inputs['coverage-file'] }}
           fail_ci_if_error: false
+
+      - name: Upload coverage artifact for validation
+        if: matrix.coverage == 'xdebug'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ matrix.php }}-${{ github.run_id }}
+          path: |
+            ${{ inputs['working-directory'] }}/${{ inputs['coverage-file'] }}
+            ${{ inputs['working-directory'] }}/coverage.cov
+          retention-days: 1
+          if-no-files-found: warn
+
+
+  coverage-validation:
+    name: Coverage Validation
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    if: inputs['enable-coverage-check'] && github.event_name == 'pull_request'
+    env:
+      COVERAGE_FILE: ${{ inputs['coverage-file'] }}
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Setup PHP for phpcov
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ inputs['php-version-quality-tools'] }}
+          coverage: none
+
+      - name: Install phpcov
+        run: |
+          composer global require --no-interaction --no-progress \
+            phpcov/phpcov:^8 \
+            rregeer/phpunit-coverage-check:^1.0
+          # Add Composer global bin to PATH for both Composer 1 and 2 locations
+          echo "$HOME/.composer/vendor/bin" >> $GITHUB_PATH
+          echo "$HOME/.config/composer/vendor/bin" >> $GITHUB_PATH
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-report-*
+          path: coverage-artifacts
+          merge-multiple: false
+        continue-on-error: true
+
+      - name: Merge coverage reports with phpcov
+        id: phpcov-merge
+        run: |
+          set -e
+          if [ ! -d "coverage-artifacts" ] || [ -z "$(ls -A coverage-artifacts || true)" ]; then
+            echo "No coverage artifacts to merge"
+            echo "merged=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Build list of directories that contain raw PHP coverage files produced by PHPUnit (--coverage-php)
+          mapfile -t COVERAGE_DIRS < <(find coverage-artifacts -type f -name "coverage.cov" -exec dirname {} \; | sort -u)
+
+          if [ ${#COVERAGE_DIRS[@]} -eq 0 ]; then
+            echo "No raw PHP coverage files (coverage.cov) found for merging"
+            echo "merged=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Found ${#COVERAGE_DIRS[@]} coverage directories to merge"
+          printf '%s\n' "${COVERAGE_DIRS[@]}" | sed 's/^/- /'
+
+          # Try merging with phpcov; if it fails, we will fallback later
+          set +e
+          phpcov merge --clover merged-coverage.xml "${COVERAGE_DIRS[@]}"
+          EXIT_CODE=$?
+          set -e
+
+          if [ $EXIT_CODE -ne 0 ] || [ ! -s merged-coverage.xml ]; then
+            echo "phpcov merge failed or produced empty output; will continue without merged file"
+            echo "merged=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "phpcov merge succeeded"
+          echo "merged=true" >> $GITHUB_OUTPUT
+
+      - name: Parse coverage and validate threshold (phpunit-coverage-check)
+        id: coverage
+        env:
+          COVERAGE_THRESHOLD: ${{ inputs['coverage-threshold'] }}
+        run: |
+          set -e
+          # Ensure artifacts exist
+          if [ ! -d "coverage-artifacts" ] || [ -z "$(ls -A coverage-artifacts || true)" ]; then
+            echo "⚠️ No coverage artifacts found"
+            echo "coverage=0.0" >> $GITHUB_OUTPUT
+            echo "status=no-coverage" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Determine target files for checking
+          if [ -s "merged-coverage.xml" ]; then
+            TARGETS=("merged-coverage.xml")
+          else
+            mapfile -t TARGETS < <(find coverage-artifacts -type f -name "${{ inputs['coverage-file'] }}")
+          fi
+
+          if [ ${#TARGETS[@]} -eq 0 ]; then
+            echo "⚠️ No Clover XML files found"
+            echo "coverage=0.0" >> $GITHUB_OUTPUT
+            echo "status=no-coverage" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Run phpunit-coverage-check. If multiple files, record minimum coverage and mark failure if any fail.
+          OVERALL_STATUS=success
+          MIN_COVERAGE=""
+          for FILE in "${TARGETS[@]}"; do
+            set +e
+            phpunit-coverage-check --min="${COVERAGE_THRESHOLD}" "$FILE" | tee coverage_check_output.txt
+            EXIT_CODE=$?
+            set -e
+            # Extract percentage like 85.23 from the tool output (last occurrence)
+            PCT=$(sed -nE 's/.*([0-9]+\.[0-9]+)%.*$/\1/p' coverage_check_output.txt | tail -n1)
+            if [ -z "$PCT" ]; then
+              # Fallback: try to read line-rate from Clover and convert to percent
+              LR=$(grep -o 'line-rate="[0-9.]*"' "$FILE" | head -1 | sed -E 's/.*="([0-9.]+)"/\1/')
+              PCT=$(awk -v lr="${LR:-0}" 'BEGIN { printf "%.2f", (lr+0)*100 }')
+            fi
+
+            if [ -z "$MIN_COVERAGE" ]; then
+              MIN_COVERAGE="$PCT"
+            else
+              awk -v a="$MIN_COVERAGE" -v b="$PCT" 'BEGIN { exit !(a+0 > b+0) }' || MIN_COVERAGE="$PCT"
+            fi
+
+            if [ $EXIT_CODE -ne 0 ]; then
+              OVERALL_STATUS=failure
+            fi
+          done
+
+          echo "coverage=${MIN_COVERAGE:-0.00}" >> $GITHUB_OUTPUT
+          echo "status=$OVERALL_STATUS" >> $GITHUB_OUTPUT
+
+      - name: Create or update PR comment
+        uses: peter-evans/create-or-update-comment@v5
+        if: always() && steps.coverage.outputs.status != 'no-coverage'
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            <!-- coverage-validation-report -->
+            ## 📊 Code Coverage Report
+            ${{ steps.coverage.outputs.status == 'success'
+                && format('✅Coverage: {0}% (min {1}%) — OK', steps.coverage.outputs.coverage, inputs['coverage-threshold'])
+                || format('❌Coverage: {0}% (min {1}%) — NOT OK', steps.coverage.outputs.coverage, inputs['coverage-threshold'])
+            }}
+
+            ---
+            <sub>Generated by [Symfony PHP Reusable Workflow](https://github.com/MacPaw/github-actions)</sub>
+          body-includes: '<!-- coverage-validation-report -->'
+          edit-mode: replace
+
+      - name: Fail if coverage below threshold
+        if: steps.coverage.outputs.status == 'failure'
+        run: |
+          echo "❌ Coverage ${{ steps.coverage.outputs.coverage }}% is below threshold ${{ inputs['coverage-threshold'] }}%"
+          exit 1
+
 
   infection:
     name: Infection Mutation Testing
@@ -592,7 +810,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: ${{ inputs['php-version-quality-tools'] }}
           coverage: xdebug
           extensions: ${{ inputs['php-extensions'] }}
 
