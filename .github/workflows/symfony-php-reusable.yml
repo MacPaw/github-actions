@@ -11,12 +11,24 @@ on:
         required: false
     inputs:
       matrix-include:
-        description: 'JSON array of additional matrix include items (e.g. [{"php":"8.4","dependencies":"lowest","coverage":"xdebug"}])'
+        description: |
+          JSON array of additional matrix combinations to include.
+          Use this to add specific package version combinations or custom configurations.
+          Examples:
+          - Add lowest dependencies test: [{"php":"8.2","dependencies":"lowest"}]
+          - Add code coverage: [{"php":"8.3","symfony":"7.0.*","coverage":"xdebug"}]
+          - Test specific package versions: [{"php":"8.2","symfony":"6.4.*","doctrine/orm":"2.14.*"}]
         required: false
         type: string
         default: '[]'
       versions-matrix:
-        description: 'JSON object with package versions to test. Format: {"php": ["8.2", "8.3"], "symfony/framework-bundle": ["6.4.*", "7.0.*"], "package/name": ["1.0.*"]}'
+        description: |
+          JSON object with package versions to test.
+          - PHP versions create matrix combinations with Symfony versions
+          - Symfony versions are tested with each PHP version
+          - Additional packages are installed from first version in array
+          - Use matrix-include for specific package version combinations
+          Format: {"php": ["8.2", "8.3"], "symfony/framework-bundle": ["6.4.*", "7.0.*"], "package/name": ["1.0.*"]}
         required: false
         type: string
         default: |
@@ -185,6 +197,7 @@ jobs:
             npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
           fi
 
+
   composer-validate:
     name: Composer Validate
     runs-on: ubuntu-latest
@@ -245,6 +258,7 @@ jobs:
             vendor/bin/phpcs
           fi
 
+
   php-cs-fixer:
     name: PHP-CS-Fixer
     runs-on: ubuntu-latest
@@ -285,6 +299,7 @@ jobs:
           else
             vendor/bin/php-cs-fixer fix --dry-run --diff --verbose
           fi
+
 
   phpstan:
     name: PHPStan
@@ -327,6 +342,7 @@ jobs:
             vendor/bin/phpstan analyse --level=${{ inputs['phpstan-level'] }} --no-progress
           fi
 
+
   rector:
     name: Rector
     runs-on: ubuntu-latest
@@ -368,20 +384,118 @@ jobs:
             vendor/bin/rector process --dry-run
           fi
 
-  unit-tests:
-    name: Unit Tests (PHP ${{ matrix.php }})
+
+  generate-matrix:
+    name: Generate Test Matrix
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.generate.outputs.matrix }}
+    steps:
+      - name: Generate matrix combinations
+        id: generate
+        run: |
+          cat > generate_matrix.py << 'PYTHON_SCRIPT'
+          import json
+          import sys
+          from itertools import product
+
+          # Read inputs
+          versions_matrix = json.loads('''${{ inputs['versions-matrix'] }}''')
+          matrix_include = json.loads('''${{ inputs['matrix-include'] }}''')
+          matrix_exclude = json.loads('''${{ inputs['matrix-exclude'] }}''')
+
+          # Separate PHP from other packages
+          php_versions = versions_matrix.get('php', [])
+          packages = {k: v for k, v in versions_matrix.items() if k != 'php'}
+
+          # Generate Cartesian product of all package versions
+          if not packages:
+              # If no packages, just use PHP versions
+              combinations = [
+                  {
+                      'php': php,
+                      'dependencies': 'highest',
+                      'title': f"PHP {php}"
+                  }
+                  for php in php_versions
+              ]
+          else:
+              package_names = list(packages.keys())
+              package_versions = [packages[name] for name in package_names]
+
+              combinations = []
+              for php in php_versions:
+                  for combo in product(*package_versions):
+                      combination = {
+                          'php': php,
+                          'dependencies': 'highest'
+                      }
+                      # Add each package version to the combination
+                      for i, package_name in enumerate(package_names):
+                          combination[package_name] = combo[i]
+
+                      # Generate title for this combination
+                      title_parts = [f"PHP {php}"]
+                      for i, package_name in enumerate(package_names):
+                          # Shorten package name for display (e.g., "symfony/cache" -> "cache")
+                          short_name = package_name.split('/')[-1] if '/' in package_name else package_name
+                          title_parts.append(f"{short_name} {combo[i]}")
+                      combination['title'] = ', '.join(title_parts)
+
+                      combinations.append(combination)
+
+          # Add matrix-include items and generate titles if missing
+          for include_item in matrix_include:
+              if 'title' not in include_item:
+                  # Generate title for matrix-include items
+                  title_parts = [f"PHP {include_item.get('php', '?')}"]
+                  for key, value in include_item.items():
+                      if key not in ['php', 'dependencies', 'coverage', 'title']:
+                          short_name = key.split('/')[-1] if '/' in key else key
+                          title_parts.append(f"{short_name} {value}")
+                  if include_item.get('dependencies') == 'lowest':
+                      title_parts.append('lowest deps')
+                  if include_item.get('coverage'):
+                      title_parts.append(f"coverage: {include_item['coverage']}")
+                  include_item['title'] = ', '.join(title_parts)
+              combinations.append(include_item)
+
+          # Filter out excluded combinations
+          def should_exclude(combo, exclude_rules):
+              for rule in exclude_rules:
+                  if all(combo.get(k) == v for k, v in rule.items()):
+                      return True
+              return False
+
+          final_combinations = [c for c in combinations if not should_exclude(c, matrix_exclude)]
+
+          # Output as JSON
+          matrix_json = json.dumps({'include': final_combinations})
+          print(f"Generated {len(final_combinations)} test combinations")
+
+          # Write to GITHUB_OUTPUT
+          import os
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"matrix={matrix_json}\n")
+          PYTHON_SCRIPT
+
+          python3 generate_matrix.py
+
+      - name: Display matrix
+        run: |
+          echo "Generated matrix:"
+          echo '${{ steps.generate.outputs.matrix }}' | jq .
+
+  unit-tests:
+    name: Unit Tests (${{ matrix.title }})
+    runs-on: ubuntu-latest
+    needs: generate-matrix
     timeout-minutes: 15
-    # make CODECOV_TOKEN available via env.*
     env:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     strategy:
       fail-fast: false
-      matrix:
-        php: ${{ (fromJSON(inputs['versions-matrix']))['php'] }}
-        dependencies: ['highest']
-        include: ${{ fromJson(inputs['matrix-include']) }}
-        exclude: ${{ fromJson(inputs['matrix-exclude']) }}
+      matrix: ${{ fromJSON(needs.generate-matrix.outputs.matrix) }}
 
     steps:
       - name: Checkout code
@@ -406,27 +520,37 @@ jobs:
           key: ${{ runner.os }}-php-${{ matrix.php }}-composer-${{ hashFiles('**/composer.lock') }}
           restore-keys: ${{ runner.os }}-php-${{ matrix.php }}-composer-
 
-      - name: Apply package version constraints
+      - name: Display matrix combination
+        run: |
+          echo "Testing with following package versions:"
+          echo '${{ toJSON(matrix) }}' | jq .
+
+      - name: Apply package version constraints from matrix
         working-directory: ${{ inputs.working-directory }}
         run: |
-          # Parse versions-matrix and apply constraints for all packages except PHP
-          echo "Applying version constraints from matrix..."
-          VERSIONS_JSON='${{ inputs['versions-matrix'] }}'
+          echo "Applying package version constraints from matrix combination..."
 
-          # Extract and apply Symfony constraint if present
-          SYMFONY_VERSION=$(echo "$VERSIONS_JSON" | jq -r '."symfony/framework-bundle"[0] // empty')
-          if [ ! -z "$SYMFONY_VERSION" ]; then
-            echo "Setting Symfony framework-bundle to $SYMFONY_VERSION"
-            composer require "symfony/framework-bundle:$SYMFONY_VERSION" --no-update --no-interaction
-            composer config extra.symfony.require "$SYMFONY_VERSION"
-          fi
+          # Get all matrix keys except system keys
+          MATRIX_JSON='${{ toJSON(matrix) }}'
 
-          # Apply constraints for all other packages
-          for package in $(echo "$VERSIONS_JSON" | jq -r 'keys[]' | grep -v '^php$' | grep -v '^symfony/framework-bundle$'); do
-            VERSION=$(echo "$VERSIONS_JSON" | jq -r --arg pkg "$package" '.[$pkg][0]')
-            echo "Setting $package to $VERSION"
-            composer require "$package:$VERSION" --no-update --no-interaction || echo "Warning: Could not set constraint for $package"
+          # Extract and apply each package version from matrix
+          # Skip system keys: php, dependencies, coverage, title, description
+          for package in $(echo "$MATRIX_JSON" | jq -r 'keys[]' | grep -v -E '^(php|dependencies|coverage|title|description)$'); do
+            VERSION=$(echo "$MATRIX_JSON" | jq -r --arg pkg "$package" '.[$pkg]')
+
+            if [ ! -z "$VERSION" ] && [ "$VERSION" != "null" ] && [ "$VERSION" != "" ]; then
+              echo "Setting $package to $VERSION"
+              composer require "$package:$VERSION" --no-update --no-interaction || echo "Warning: Could not set constraint for $package"
+
+              # Set Symfony version globally if this is symfony/framework-bundle
+              if [ "$package" = "symfony/framework-bundle" ]; then
+                echo "Setting Symfony global version constraint"
+                composer config extra.symfony.require "$VERSION" || true
+              fi
+            fi
           done
+
+          echo "✓ Package version constraints applied successfully"
 
       - name: Install dependencies (highest)
         if: matrix.dependencies == 'highest'
