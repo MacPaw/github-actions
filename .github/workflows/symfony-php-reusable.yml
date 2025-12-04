@@ -1,0 +1,494 @@
+name: Symfony PHP Reusable Workflow
+
+on:
+  workflow_call:
+    inputs:
+      versions-matrix:
+        description: 'JSON object with package versions to test. Format: {"php": ["8.2", "8.3"], "symfony/framework-bundle": ["6.4.*", "7.0.*"], "package/name": ["1.0.*"]}'
+        required: false
+        type: string
+        default: |
+          {
+            "php": ["8.2", "8.3", "8.4"],
+            "symfony/framework-bundle": ["6.4.*", "7.0.*", "7.3.*"]
+          }
+      enable-code-coverage:
+        description: 'Enable code coverage reporting'
+        required: false
+        type: boolean
+        default: true
+      enable-phpstan:
+        description: 'Enable PHPStan static analysis'
+        required: false
+        type: boolean
+        default: true
+      enable-phpcs:
+        description: 'Enable PHP_CodeSniffer'
+        required: false
+        type: boolean
+        default: true
+      enable-php-cs-fixer:
+        description: 'Enable PHP-CS-Fixer'
+        required: false
+        type: boolean
+        default: false
+      enable-rector:
+        description: 'Enable Rector checks'
+        required: false
+        type: boolean
+        default: false
+      enable-infection:
+        description: 'Enable Infection mutation testing'
+        required: false
+        type: boolean
+        default: false
+      enable-commitlint:
+        description: 'Enable commit message linting'
+        required: false
+        type: boolean
+        default: false
+      enable-composer-validate:
+        description: 'Enable Composer validation'
+        required: false
+        type: boolean
+        default: true
+      test-lowest-dependencies:
+        description: 'Test with lowest dependencies'
+        required: false
+        type: boolean
+        default: false
+      phpstan-level:
+        description: 'PHPStan level (0-9 or max)'
+        required: false
+        type: string
+        default: 'max'
+      working-directory:
+        description: 'Working directory for the project'
+        required: false
+        type: string
+        default: '.'
+      php-extensions:
+        description: 'Additional PHP extensions to install'
+        required: false
+        type: string
+        default: 'mbstring, json'
+      matrix-exclude:
+        description: 'JSON array of matrix combinations to exclude (e.g. [{"php": "8.1", "symfony/framework-bundle": "7.0.*"}]). Default excludes Symfony 7.x with PHP < 8.2'
+        required: false
+        type: string
+        default: |
+          [
+            {"php": "7.4", "symfony/framework-bundle": "7.0.*"},
+            {"php": "8.0", "symfony/framework-bundle": "7.0.*"},
+            {"php": "8.1", "symfony/framework-bundle": "7.0.*"},
+            {"php": "7.4", "symfony/framework-bundle": "7.1.*"},
+            {"php": "8.0", "symfony/framework-bundle": "7.1.*"},
+            {"php": "8.1", "symfony/framework-bundle": "7.1.*"},
+            {"php": "7.4", "symfony/framework-bundle": "7.2.*"},
+            {"php": "8.0", "symfony/framework-bundle": "7.2.*"},
+            {"php": "8.1", "symfony/framework-bundle": "7.2.*"},
+            {"php": "7.4", "symfony/framework-bundle": "7.3.*"},
+            {"php": "8.0", "symfony/framework-bundle": "7.3.*"},
+            {"php": "8.1", "symfony/framework-bundle": "7.3.*"}
+          ]
+      infection-min-msi:
+        description: 'Minimum Mutation Score Indicator (MSI) for Infection'
+        required: false
+        type: number
+        default: 80
+      infection-min-covered-msi:
+        description: 'Minimum Covered Code MSI for Infection'
+        required: false
+        type: number
+        default: 90
+      phpstan-config:
+        description: 'Path to PHPStan configuration file (default: phpstan.neon.dist or phpstan.neon)'
+        required: false
+        type: string
+        default: ''
+      phpcs-config:
+        description: 'Path to PHP_CodeSniffer configuration file (default: phpcs.xml.dist or phpcs.xml)'
+        required: false
+        type: string
+        default: ''
+      php-cs-fixer-config:
+        description: 'Path to PHP-CS-Fixer configuration file (default: .php-cs-fixer.dist.php or .php-cs-fixer.php)'
+        required: false
+        type: string
+        default: ''
+      rector-config:
+        description: 'Path to Rector configuration file (default: rector.php)'
+        required: false
+        type: string
+        default: ''
+      infection-config:
+        description: 'Path to Infection configuration file (default: infection.json5 or infection.json)'
+        required: false
+        type: string
+        default: ''
+      commitlint-config:
+        description: 'Path to Commitlint configuration file (default: .commitlintrc.json)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      codecov-token:
+        description: 'Codecov token for coverage upload'
+        required: false
+
+env:
+  COMPOSER_ROOT_VERSION: "1.0.0"
+
+jobs:
+  commitlint:
+    name: Commit Lint
+    runs-on: ubuntu-latest
+    if: inputs.enable-commitlint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install commitlint
+        run: |
+          npm install --save-dev @commitlint/{config-conventional,cli}
+
+      - name: Validate current commit (single commit)
+        if: github.event_name == 'push'
+        run: |
+          if [ -n "${{ inputs.commitlint-config }}" ]; then
+            npx commitlint --from HEAD~1 --to HEAD --verbose --config ${{ inputs.commitlint-config }}
+          else
+            npx commitlint --from HEAD~1 --to HEAD --verbose
+          fi
+
+      - name: Validate PR commits
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ -n "${{ inputs.commitlint-config }}" ]; then
+            npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose --config ${{ inputs.commitlint-config }}
+          else
+            npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
+          fi
+
+  composer-validate:
+    name: Composer Validate
+    runs-on: ubuntu-latest
+    if: inputs.enable-composer-validate
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Validate composer.json and composer.lock
+        working-directory: ${{ inputs.working-directory }}
+        run: composer validate --strict --no-check-publish
+
+  phpcs:
+    name: PHP_CodeSniffer
+    runs-on: ubuntu-latest
+    if: inputs.enable-phpcs
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          extensions: ${{ inputs.php-extensions }}
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        working-directory: ${{ inputs.working-directory }}
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run PHP_CodeSniffer
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ -n "${{ inputs.phpcs-config }}" ]; then
+            vendor/bin/phpcs --standard=${{ inputs.phpcs-config }}
+          else
+            vendor/bin/phpcs
+          fi
+
+  php-cs-fixer:
+    name: PHP-CS-Fixer
+    runs-on: ubuntu-latest
+    if: inputs.enable-php-cs-fixer
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          extensions: ${{ inputs.php-extensions }}
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        working-directory: ${{ inputs.working-directory }}
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run PHP-CS-Fixer
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ -n "${{ inputs.php-cs-fixer-config }}" ]; then
+            vendor/bin/php-cs-fixer fix --dry-run --diff --verbose --config=${{ inputs.php-cs-fixer-config }}
+          else
+            vendor/bin/php-cs-fixer fix --dry-run --diff --verbose
+          fi
+
+  phpstan:
+    name: PHPStan
+    runs-on: ubuntu-latest
+    if: inputs.enable-phpstan
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          extensions: ${{ inputs.php-extensions }}
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        working-directory: ${{ inputs.working-directory }}
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run PHPStan
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ -n "${{ inputs.phpstan-config }}" ]; then
+            vendor/bin/phpstan analyse --level=${{ inputs.phpstan-level }} --no-progress -c ${{ inputs.phpstan-config }}
+          else
+            vendor/bin/phpstan analyse --level=${{ inputs.phpstan-level }} --no-progress
+          fi
+
+  rector:
+    name: Rector
+    runs-on: ubuntu-latest
+    if: inputs.enable-rector
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          extensions: ${{ inputs.php-extensions }}
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        working-directory: ${{ inputs.working-directory }}
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run Rector
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ -n "${{ inputs.rector-config }}" ]; then
+            vendor/bin/rector process --dry-run --config ${{ inputs.rector-config }}
+          else
+            vendor/bin/rector process --dry-run
+          fi
+
+  unit-tests:
+    name: Unit Tests (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ${{ fromJson(fromJson(inputs.versions-matrix).php) }}
+        dependencies: ['highest']
+        versions-matrix: ['${{ inputs.versions-matrix }}']
+        include:
+          - php: ${{ fromJson(fromJson(inputs.versions-matrix).php)[0] }}
+            dependencies: 'lowest'
+            coverage: ${{ inputs.enable-code-coverage && 'xdebug' || 'none' }}
+            versions-matrix: '${{ inputs.versions-matrix }}'
+        exclude: ${{ fromJson(inputs.matrix-exclude) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: ${{ matrix.coverage || 'none' }}
+          extensions: ${{ inputs.php-extensions }}
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        working-directory: ${{ inputs.working-directory }}
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-php-${{ matrix.php }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-php-${{ matrix.php }}-composer-
+
+      - name: Apply package version constraints
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          # Parse versions-matrix and apply constraints for all packages except PHP
+          echo "Applying version constraints from matrix..."
+          VERSIONS_JSON='${{ matrix.versions-matrix }}'
+
+          # Extract and apply Symfony constraint if present
+          SYMFONY_VERSION=$(echo "$VERSIONS_JSON" | jq -r '."symfony/framework-bundle"[0] // empty')
+          if [ ! -z "$SYMFONY_VERSION" ]; then
+            echo "Setting Symfony framework-bundle to $SYMFONY_VERSION"
+            composer require "symfony/framework-bundle:$SYMFONY_VERSION" --no-update --no-interaction
+            composer config extra.symfony.require "$SYMFONY_VERSION"
+          fi
+
+          # Apply constraints for all other packages
+          for package in $(echo "$VERSIONS_JSON" | jq -r 'keys[]' | grep -v '^php$' | grep -v '^symfony/framework-bundle$'); do
+            VERSION=$(echo "$VERSIONS_JSON" | jq -r --arg pkg "$package" '.[$pkg][0]')
+            echo "Setting $package to $VERSION"
+            composer require "$package:$VERSION" --no-update --no-interaction || echo "Warning: Could not set constraint for $package"
+          done
+
+      - name: Install dependencies (highest)
+        if: matrix.dependencies == 'highest'
+        working-directory: ${{ inputs.working-directory }}
+        run: composer update --no-interaction --no-progress --prefer-dist
+
+      - name: Install dependencies (lowest)
+        if: matrix.dependencies == 'lowest'
+        working-directory: ${{ inputs.working-directory }}
+        run: composer update --no-interaction --no-progress --prefer-dist --prefer-lowest --prefer-stable
+
+      - name: Run PHPUnit
+        if: matrix.coverage != 'xdebug'
+        working-directory: ${{ inputs.working-directory }}
+        run: vendor/bin/phpunit --testdox
+
+      - name: Run PHPUnit with coverage
+        if: matrix.coverage == 'xdebug'
+        working-directory: ${{ inputs.working-directory }}
+        run: vendor/bin/phpunit --testdox --coverage-clover=coverage.xml
+
+      - name: Upload coverage to Codecov
+        if: matrix.coverage == 'xdebug' && secrets.codecov-token != ''
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.codecov-token }}
+          files: ${{ inputs.working-directory }}/coverage.xml
+          fail_ci_if_error: false
+
+  infection:
+    name: Infection Mutation Testing
+    runs-on: ubuntu-latest
+    if: inputs.enable-infection
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: xdebug
+          extensions: ${{ inputs.php-extensions }}
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        working-directory: ${{ inputs.working-directory }}
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run Infection
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          CMD="vendor/bin/infection --min-msi=${{ inputs.infection-min-msi }} --min-covered-msi=${{ inputs.infection-min-covered-msi }} --threads=4 --no-progress"
+          if [ -n "${{ inputs.infection-config }}" ]; then
+            CMD="$CMD --configuration=${{ inputs.infection-config }}"
+          fi
+          $CMD
+        env:
+          INFECTION_BADGE_API_KEY: ${{ secrets.INFECTION_BADGE_API_KEY }}
