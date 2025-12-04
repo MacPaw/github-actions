@@ -372,9 +372,9 @@ jobs:
     name: Unit Tests (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
-      # make CODECOV_TOKEN available via env.*
-      env:
-        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    # make CODECOV_TOKEN available via env.*
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
