@@ -88,6 +88,11 @@ on:
         required: false
         type: string
         default: 'coverage.xml'
+      phpcov-version:
+        description: 'phpcov PHAR version to download from phar.phpunit.de (e.g. 8.2 -> phpcov-8.2.phar)'
+        required: false
+        type: string
+        default: '8.2'
       phpstan-level:
         description: 'PHPStan level (0-9 or max)'
         required: false
@@ -476,17 +481,48 @@ jobs:
               combinations.append(include_item)
 
           # Filter out excluded combinations
+          def _normalize_version(val: str):
+              """
+              Normalize versions so that values with trailing .* behave as a prefix filter.
+              Examples:
+                rule:  "7.3.*" matches combo values "7.3", "7.3.*", "7.3.x", etc. (prefix "7.3")
+                rule:  "7.3"    requires exact match "7.3" (no wildcard semantics)
+              """
+              return val[:-2] if isinstance(val, str) and val.endswith('.*') else val
+
+          def _matches(rule_val, combo_val):
+              # Exact match when rule has no wildcard
+              if not (isinstance(rule_val, str) and rule_val.endswith('.*')):
+                  return combo_val == rule_val
+
+              # Wildcard/prefix match when rule ends with .* (treat as startswith of the prefix)
+              prefix = _normalize_version(rule_val)
+
+              if not isinstance(combo_val, str):
+                  return False
+
+              # Also normalize combo like "7.3.*" to its prefix for matching consistency
+              combo_norm = _normalize_version(combo_val)
+              return str(combo_norm).startswith(str(prefix))
+
           def should_exclude(combo, exclude_rules):
               for rule in exclude_rules:
-                  if all(combo.get(k) == v for k, v in rule.items()):
+                  # All keys in rule must match the combo using wildcard-aware semantics
+                  if all(_matches(v, combo.get(k)) for k, v in rule.items()):
                       return True
               return False
 
-          final_combinations = [c for c in combinations if not should_exclude(c, matrix_exclude)]
+          excluded = []
+          final_combinations = []
+          for c in combinations:
+              if should_exclude(c, matrix_exclude):
+                  excluded.append(c)
+              else:
+                  final_combinations.append(c)
 
           # Output as JSON
           matrix_json = json.dumps({'include': final_combinations})
-          print(f"Generated {len(final_combinations)} test combinations")
+          print(f"Generated {len(final_combinations)} test combinations (excluded {len(excluded)})")
 
           # Write to GITHUB_OUTPUT
           import os
@@ -598,14 +634,19 @@ jobs:
 
       - name: Install dependencies
         working-directory: ${{ inputs['working-directory'] }}
+        env:
+          # Pass detected Symfony version to Composer/Symfony Flex, if any
+          SYMFONY_REQUIRE: ${{ steps.apply-constraints.outputs.symfony_version }}
         run: |
-          echo "Requested constraints: ${{ steps.apply-constraints.outputs.composer_packages }}"
-          if [ "${{ matrix.dependencies }}" = "lowest" ]; then
-            echo "Installing lowest compatible dependencies..."
-            composer update --prefer-lowest --prefer-stable --no-interaction --no-progress
+          # Make sure Flex is allowed/available (if not already in your workflow)
+          composer global config --no-plugins allow-plugins.symfony/flex true
+          composer global require --no-progress --no-scripts --no-plugins symfony/flex
+          if [ -n "${SYMFONY_REQUIRE}" ]; then
+            echo "Using Symfony constraint: ${SYMFONY_REQUIRE}"
+            composer update --prefer-dist --no-progress --no-interaction          
           else
-            echo "Installing highest (locked) dependencies..."
-            composer update --no-interaction --no-progress --prefer-dist
+            echo "No SYMFONY_REQUIRE set, using lock file"
+            composer install --prefer-dist --no-progress --no-interaction
           fi
 
       - name: Run PHPUnit
@@ -661,11 +702,19 @@ jobs:
           php-version: ${{ inputs['php-version-quality-tools'] }}
           coverage: none
 
-      - name: Install phpcov
+      - name: Install coverage tools (phpcov PHAR + phpunit-coverage-check)
         run: |
+          set -e
+          # Download phpcov PHAR for requested version
+          PHPCOV_VERSION="${{ inputs['phpcov-version'] }}"
+          PHPCOV_URL="https://phar.phpunit.de/phpcov-${PHPCOV_VERSION}.phar"
+          echo "Downloading phpcov from ${PHPCOV_URL}"
+          wget -q -O phpcov.phar "$PHPCOV_URL"
+          chmod +x phpcov.phar
+
+          # Install phpunit-coverage-check globally via Composer
           composer global require --no-interaction --no-progress \
-            phpcov/phpcov:^8 \
-            rregeer/phpunit-coverage-check:^1.0
+            rregeer/phpunit-coverage-check:*
           # Add Composer global bin to PATH for both Composer 1 and 2 locations
           echo "$HOME/.composer/vendor/bin" >> $GITHUB_PATH
           echo "$HOME/.config/composer/vendor/bin" >> $GITHUB_PATH
@@ -702,7 +751,7 @@ jobs:
 
           # Try merging with phpcov; if it fails, we will fallback later
           set +e
-          phpcov merge --clover merged-coverage.xml "${COVERAGE_DIRS[@]}"
+          php phpcov.phar merge --clover merged-coverage.xml "${COVERAGE_DIRS[@]}"
           EXIT_CODE=$?
           set -e
 
@@ -715,7 +764,7 @@ jobs:
           echo "phpcov merge succeeded"
           echo "merged=true" >> $GITHUB_OUTPUT
 
-      - name: Parse coverage and validate threshold (phpunit-coverage-check)
+      - name: Parse coverage and validate threshold (coverage-check)
         id: coverage
         env:
           COVERAGE_THRESHOLD: ${{ inputs['coverage-threshold'] }}
@@ -743,21 +792,19 @@ jobs:
             exit 0
           fi
 
-          # Run phpunit-coverage-check. If multiple files, record minimum coverage and mark failure if any fail.
+          # Run coverage-check (from rregeer/phpunit-coverage-check). If multiple files, record minimum coverage and mark failure if any fail.
           OVERALL_STATUS=success
           MIN_COVERAGE=""
           for FILE in "${TARGETS[@]}"; do
             set +e
-            phpunit-coverage-check --min="${COVERAGE_THRESHOLD}" "$FILE" | tee coverage_check_output.txt
+            coverage-check "$FILE" "${COVERAGE_THRESHOLD}" | tee coverage_check_output.txt
             EXIT_CODE=$?
             set -e
-            # Extract percentage like 85.23 from the tool output (last occurrence)
-            PCT=$(sed -nE 's/.*([0-9]+\.[0-9]+)%.*$/\1/p' coverage_check_output.txt | tail -n1)
-            if [ -z "$PCT" ]; then
-              # Fallback: try to read line-rate from Clover and convert to percent
-              LR=$(grep -o 'line-rate="[0-9.]*"' "$FILE" | head -1 | sed -E 's/.*="([0-9.]+)"/\1/')
-              PCT=$(awk -v lr="${LR:-0}" 'BEGIN { printf "%.2f", (lr+0)*100 }')
-            fi
+            # Extract the current coverage percentage (first percentage in output) strictly from command output only.
+            # Accept optional space before % and comma decimals, normalize to dot.
+            PCT=$(grep -Eo '([0-9]+([\.,][0-9]+)?)\s*%' coverage_check_output.txt | head -n1 | sed -E 's/%//; s/,/./; s/^[[:space:]]+|[[:space:]]+$//g')
+            # If percentage not found in output, default to 0.00 (no file/XML parsing fallback by design)
+            if [ -z "$PCT" ]; then PCT="0.00"; fi
 
             if [ -z "$MIN_COVERAGE" ]; then
               MIN_COVERAGE="$PCT"
@@ -782,12 +829,12 @@ jobs:
             <!-- coverage-validation-report -->
             ## 📊 Code Coverage Report
             ${{ steps.coverage.outputs.status == 'success'
-                && format('✅Coverage: {0}% (min {1}%) — OK', steps.coverage.outputs.coverage, inputs['coverage-threshold'])
-                || format('❌Coverage: {0}% (min {1}%) — NOT OK', steps.coverage.outputs.coverage, inputs['coverage-threshold'])
+                && format('✅ Coverage: {0}% (min {1}%) — OK', steps.coverage.outputs.coverage, inputs['coverage-threshold'])
+                || format('❌ Coverage: {0}% (min {1}%) — NOT OK', steps.coverage.outputs.coverage, inputs['coverage-threshold'])
             }}
 
             ---
-            <sub>Generated by [Symfony PHP Reusable Workflow](https://github.com/MacPaw/github-actions)</sub>
+            <sub>Generated by [Macpaw Symfony PHP Reusable Workflow](https://github.com/MacPaw/github-actions)</sub>
           body-includes: '<!-- coverage-validation-report -->'
           edit-mode: replace
 

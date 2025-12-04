@@ -17,6 +17,7 @@ The workflow now features **fully dynamic matrix generation** with Cartesian pro
 - 🚫 **matrix-exclude**: Filter incompatible combinations
 - 🐛 **Xdebug Auto-Configuration**: Automatically adds xdebug extension when coverage enabled
 - 🔧 **Quality Tools PHP Version**: Configure separate PHP version for static analysis tools
+- 🧩 **Symfony Minor Detection**: The workflow detects the Symfony version from your matrix and exposes it to Composer via `SYMFONY_REQUIRE` during dependency installation (no change to install commands required)
 
 **Example Matrix Output:**
 ```text
@@ -69,11 +70,12 @@ This workflow automates the complete CI process for Symfony PHP projects:
 | `enable-coverage-check` | boolean | ❌ | `false` | Enable coverage validation and PR comments |
 | `coverage-threshold` | number | ❌ | `70` | Minimum code coverage percentage required (0-100) |
 | `coverage-file` | string | ❌ | `coverage.xml` | Coverage report file name (Clover XML). Used for PHPUnit generation, Codecov upload, and coverage validation. |
+| `phpcov-version` | string | ❌ | `8.2` | Version of phpcov PHAR to download from phar.phpunit.de (e.g., `8.2` downloads `phpcov-8.2.phar`). |
 | `phpstan-level` | string | ❌ | `max` | PHPStan level (0-9 or max) |
 | `working-directory` | string | ❌ | `.` | Working directory for the project |
 | `php-extensions` | string | ❌ | `mbstring, json` | Additional PHP extensions to install. xdebug auto-added when coverage enabled. |
 | `php-version-quality-tools` | string | ❌ | `8.3` | PHP version to use for quality tools (PHPStan, PHPCS, Rector, Infection, etc.) |
-| `matrix-exclude` | string (JSON array) | ❌ | Default Symfony 7.x exclusions | Matrix combinations to exclude. Supports any package from `versions-matrix`. |
+| `matrix-exclude` | string (JSON array) | ❌ | Default Symfony 7.x exclusions | Matrix combinations to exclude. Supports any package from `versions-matrix`. Values ending with `.*` act as wildcards/prefixes (e.g., `"7.3.*"` matches `"7.3"` and `"7.3.*"`), while values without `.*` require exact match. |
 | `infection-min-msi` | number | ❌ | `80` | Minimum Mutation Score Indicator (MSI) for Infection |
 | `infection-min-covered-msi` | number | ❌ | `90` | Minimum Covered Code MSI for Infection |
 | `phpstan-config` | string | ❌ | `''` | Path to PHPStan configuration file (default: phpstan.neon.dist or phpstan.neon) |
@@ -716,7 +718,7 @@ Generated Combinations:
 - **Symfony 7.3+**: Requires PHP 8.2+
 
 #### Dynamic Package Constraint Application
-The workflow automatically applies version constraints for **all packages** in versions-matrix:
+The workflow automatically applies version constraints for **all packages** in versions-matrix and detects Symfony minor for Flex:
 
 **Process:**
 1. **Parse Matrix**: Each test job receives matrix combination (e.g., `{"php": "8.3", "symfony/cache": "7.0.*", "symfony/config": "6.4.*"}`)
@@ -726,6 +728,7 @@ The workflow automatically applies version constraints for **all packages** in v
    - Apply constraint: `composer require "{package}:{version}" --no-update --no-interaction`
    - Detect Symfony version and set Composer extra: If the package is `symfony/framework-bundle`, set `composer config extra.symfony.require "{version}"`. If not provided, the workflow will try to infer Symfony version from the first `symfony/*` package in the matrix and set it accordingly.
 4. **Install Dependencies**:
+   - The job exports `SYMFONY_REQUIRE` environment variable for this step using the detected Symfony version. This lets Symfony Flex align all `symfony/*` packages to the same minor automatically.
    - Highest: `composer update --no-interaction --no-progress --prefer-dist`
    - Lowest: `composer update --prefer-lowest --prefer-stable --no-interaction --no-progress`
 
@@ -754,6 +757,7 @@ versions-matrix: |
 # - symfony/console:7.0.*
 # - doctrine/orm:3.0.*
 # extra.symfony.require: 7.0.*
+# SYMFONY_REQUIRE env (Install dependencies step): 7.0.*
 ```
 
 **Key Feature**: NO hardcoded package names! The workflow dynamically detects and applies constraints for any packages in the matrix.
@@ -835,6 +839,16 @@ with:
       {"php": "8.4", "symfony/framework-bundle": "6.4.*"}
     ]
 ```
+
+#### Exclusion Matching Semantics
+
+- Wildcard match: A rule value ending with `.*` is treated as a prefix. For example:
+  - `{ "symfony/framework-bundle": "7.3.*" }` will match matrix values `"7.3"`, `"7.3.*"`, `"7.3.x"`, etc.
+- Exact match: A rule value without `.*` must equal the matrix value exactly. For example:
+  - `{ "php": "8.2" }` matches only `"8.2"`, not `"8.2.1"`.
+- Mixed rules: All keys in a rule must match (AND behavior). This lets you target precise combinations like `{ "php": "8.2", "symfony/framework-bundle": "7.2.*" }`.
+
+This behavior ensures that exclusions like `"7.2.*"` and `"7.3.*"` properly skip jobs even if your `versions-matrix` lists values as `"7.2"` or `"7.3"` without the trailing `.*`.
 
 **Disable All Exclusions:**
 ```yaml
@@ -933,12 +947,13 @@ Coverage is enabled per matrix combination by adding `"coverage": "xdebug"` via 
 
 ### ✅ Coverage Validation
 
-Automatically validate code coverage on pull requests and post a concise PR comment. The workflow merges coverage where possible and validates with `rregeer/phpunit-coverage-check` only — no Python is used.
+Automatically validate code coverage on pull requests and post a concise PR comment. The workflow merges coverage where possible and validates with `rregeer/phpunit-coverage-check` only — no Python or XML parsing is used for the percentage value.
 
 **Features:**
 - ✅ **Merged Coverage (phpcov)**: Attempts to merge raw coverage (`coverage.cov`) from all coverage-enabled test jobs into a single Clover report
 - 🧰 **Threshold Check (phpunit-coverage-check)**: Validates coverage against your threshold on the merged Clover; if no merged file, validates a single Clover file; if multiple files exist, each is checked and the lowest reported coverage is shown
 - 💬 **Simple PR Comment**: Posts a single line message: `Coverage: <pct>% (min <threshold>%) — OK/NOT OK`
+- 📈 **Percentage Source**: The `<pct>` shown is parsed strictly from the `coverage-check` command output. There are no fallbacks to parse Clover/XML files.
 - 🎯 **Configurable Threshold**: Set minimum required coverage percentage
 - ❌ **Fail on Low Coverage**: Workflow fails if coverage is below threshold
 
@@ -952,10 +967,10 @@ coverage-threshold: 80           # Minimum coverage % (default: 70)
 1. Unit tests with coverage generate Clover XML (`coverage.xml` by default) and raw coverage (`coverage.cov`).
 2. Coverage files are uploaded as artifacts (one artifact per matrix job).
 3. `coverage-validation` job:
-   - Installs two tools globally: `phpcov/phpcov` and `rregeer/phpunit-coverage-check`
+   - Downloads `phpcov` as a PHAR from phar.phpunit.de using `phpcov-version` input and installs `rregeer/phpunit-coverage-check` globally
    - Downloads all coverage artifacts to `coverage-artifacts/`
-   - Attempts to merge raw coverage with `phpcov merge --clover merged-coverage.xml <dirs>`
-   - Runs `phpunit-coverage-check --min=<threshold>` on the merged Clover; if no merged file exists, checks the single Clover file; if multiple Clovers exist, each is checked and the result fails if any are below the threshold
+   - Attempts to merge raw coverage with `php phpcov.phar merge --clover merged-coverage.xml <dirs>`
+   - Runs `coverage-check <file> <min>` on the merged Clover (or each single Clover if no merge). The reported percentage in the PR comment is taken directly from the command output. No XML parsing or other fallbacks are used to derive the coverage value.
 4. Posts or updates a PR comment with a simple OK/NOT OK message and the current coverage value
 5. Fails job if coverage < threshold
 
@@ -968,7 +983,7 @@ Coverage: 85.50% (min 80%) — OK
 - Must run on `pull_request` event (validation only runs on PRs)
 - At least one matrix combination must have `"coverage": "xdebug"`
 - Requires `pull-requests: write` permission (auto-granted in most workflows)
-- `phpcov/phpcov` and `rregeer/phpunit-coverage-check` are installed automatically in the coverage validation job
+- `phpcov` is downloaded as a PHAR (`phpcov-<version>.phar`) and `rregeer/phpunit-coverage-check` is installed automatically in the coverage validation job
 
 **Edge Cases:**
 - **No coverage artifacts**: Job succeeds with status "no-coverage" (no comment posted)
