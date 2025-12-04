@@ -372,6 +372,9 @@ jobs:
     name: Unit Tests (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+      # make CODECOV_TOKEN available via env.*
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -446,10 +449,10 @@ jobs:
         run: vendor/bin/phpunit --testdox --coverage-clover=coverage.xml
 
       - name: Upload coverage to Codecov
-        if: matrix.coverage == 'xdebug' && secrets.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4
+        if: matrix.coverage == 'xdebug' && env.CODECOV_TOKEN != ''
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ env.CODECOV_TOKEN }}
           files: ${{ inputs['working-directory'] }}/coverage.xml
           fail_ci_if_error: false
 
