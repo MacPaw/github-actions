@@ -1,0 +1,167 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.2.3 or v1.2.3)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: 'Create as draft release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  discussions: write
+
+jobs:
+  validate-version:
+    name: Validate Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      version_tag: ${{ steps.validate.outputs.version_tag }}
+      is_prerelease: ${{ steps.validate.outputs.is_prerelease }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate semantic version
+        id: validate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            IS_PRERELEASE="${{ inputs.prerelease }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+            # Auto-detect prerelease from version string
+            if [[ "$VERSION" =~ -[a-zA-Z0-9]+ ]]; then
+              IS_PRERELEASE="true"
+            else
+              IS_PRERELEASE="false"
+            fi
+          fi
+
+          # Strip 'v' prefix if present
+          VERSION_NO_V="${VERSION#v}"
+          VERSION_TAG="v${VERSION_NO_V}"
+
+          # Validate semantic versioning format
+          if [[ ! "$VERSION_NO_V" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$ ]]; then
+            echo "Error: Version '$VERSION' does not follow semantic versioning (e.g., 1.2.3, 1.2.3-alpha.1, 1.2.3+build.123)"
+            exit 1
+          fi
+
+          echo "version=${VERSION_NO_V}" >> $GITHUB_OUTPUT
+          echo "version_tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
+          echo "is_prerelease=${IS_PRERELEASE}" >> $GITHUB_OUTPUT
+
+          echo "✅ Version validated: ${VERSION_NO_V}"
+          echo "📌 Tag: ${VERSION_TAG}"
+          echo "🏷️  Pre-release: ${IS_PRERELEASE}"
+
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: validate-version
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the previous tag
+          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -v "${{ needs.validate-version.outputs.version_tag }}" | head -n 1)
+
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "No previous tag found, using all commits"
+            PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+
+          echo "Generating changelog from $PREVIOUS_TAG to ${{ needs.validate-version.outputs.version_tag }}"
+
+          # Generate changelog
+          CHANGELOG=$(git log ${PREVIOUS_TAG}..${{ needs.validate-version.outputs.version_tag }} \
+            --pretty=format:"- %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" \
+            --no-merges)
+
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- No changes recorded"
+          fi
+
+          # Group changes by type
+          FEATURES=$(echo "$CHANGELOG" | grep -i "^- feat" || echo "")
+          FIXES=$(echo "$CHANGELOG" | grep -i "^- fix" || echo "")
+          DOCS=$(echo "$CHANGELOG" | grep -i "^- docs" || echo "")
+          CHORES=$(echo "$CHANGELOG" | grep -i "^- chore" || echo "")
+          OTHERS=$(echo "$CHANGELOG" | grep -v "^- feat" | grep -v "^- fix" | grep -v "^- docs" | grep -v "^- chore" || echo "")
+
+          # Build formatted changelog
+          FORMATTED_CHANGELOG="## What's Changed\n\n"
+
+          if [ ! -z "$FEATURES" ]; then
+            FORMATTED_CHANGELOG="${FORMATTED_CHANGELOG}### ✨ Features\n${FEATURES}\n\n"
+          fi
+
+          if [ ! -z "$FIXES" ]; then
+            FORMATTED_CHANGELOG="${FORMATTED_CHANGELOG}### 🐛 Bug Fixes\n${FIXES}\n\n"
+          fi
+
+          if [ ! -z "$DOCS" ]; then
+            FORMATTED_CHANGELOG="${FORMATTED_CHANGELOG}### 📚 Documentation\n${DOCS}\n\n"
+          fi
+
+          if [ ! -z "$CHORES" ]; then
+            FORMATTED_CHANGELOG="${FORMATTED_CHANGELOG}### 🔧 Maintenance\n${CHORES}\n\n"
+          fi
+
+          if [ ! -z "$OTHERS" ]; then
+            FORMATTED_CHANGELOG="${FORMATTED_CHANGELOG}### 🔄 Other Changes\n${OTHERS}\n\n"
+          fi
+
+          FORMATTED_CHANGELOG="${FORMATTED_CHANGELOG}**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${{ needs.validate-version.outputs.version_tag }}"
+
+          # Save to file for GitHub release
+          echo -e "$FORMATTED_CHANGELOG" > CHANGELOG.md
+
+          echo "changelog_file=CHANGELOG.md" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate-version.outputs.version_tag }}
+          name: Release ${{ needs.validate-version.outputs.version }}
+          body_path: CHANGELOG.md
+          draft: ${{ inputs.draft || false }}
+          prerelease: ${{ needs.validate-version.outputs.is_prerelease }}
+          generate_release_notes: false
+          discussion_category_name: Announcements
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## 🎉 Release Created Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.validate-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** ${{ needs.validate-version.outputs.version_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Pre-release:** ${{ needs.validate-version.outputs.is_prerelease }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Draft:** ${{ inputs.draft || false }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 [View Release](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-version.outputs.version_tag }})" >> $GITHUB_STEP_SUMMARY

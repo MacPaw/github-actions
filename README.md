@@ -22,6 +22,15 @@ All reusable workflows are located in `.github/workflows` folder
   - ⚡ **Performance Optimized** - Parallel execution, intelligent caching
   - [📚 Detailed Documentation](docs/workflows/symfony-php-reusable.md)
 
+- [release.yml](.github/workflows/release.yml) - Automated release workflow with semantic versioning
+  - ✅ **Semantic Versioning** - Strict semver validation (MAJOR.MINOR.PATCH)
+  - 📝 **Automatic Changelog** - Grouped by commit types (features, fixes, docs)
+  - 🏷️ **Pre-release Support** - Auto-detection or manual specification
+  - 📦 **Draft Releases** - Create draft releases for review
+  - 🔄 **Multiple Triggers** - Tag push or manual workflow dispatch
+  - 💬 **Discussion Integration** - Automatic discussion creation
+  - [📚 Detailed Documentation](docs/workflows/release.md)
+
 ### Documentation
 
 - [Symfony PHP Reusable Workflow](docs/workflows/symfony-php-reusable.md) - Complete workflow documentation with:
@@ -34,6 +43,17 @@ All reusable workflows are located in `.github/workflows` folder
   - 🔧 Troubleshooting guide
   - 📊 Analysis of MacPaw's Symfony repositories
   - 📈 Best practices and recommendations
+
+- [Release Workflow](docs/workflows/release.md) - Complete release workflow documentation with:
+  - 📦 Semantic versioning guidelines and validation
+  - 🚀 Multiple usage examples (tag push, manual, pre-release, draft)
+  - 📝 Automatic changelog generation and formatting
+  - 🏷️ Pre-release detection and handling
+  - 🔄 Workflow process and diagrams
+  - ⚙️ Configuration options and inputs
+  - 🔧 Troubleshooting guide
+  - 📋 Best practices and conventional commits
+  - 🛠️ Advanced configuration examples
 
 ### Contributing
 
@@ -58,4 +78,5 @@ For information about reporting security vulnerabilities, please see our [Securi
 - [MacPaw GitHub Organization](https://github.com/MacPaw/)
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Symfony PHP Package reusable workflow](docs/workflows/symfony-php-reusable.md)
+- [Release workflow](docs/workflows/release.md)
 - [Repository Analysis](ANALYSIS.md)
