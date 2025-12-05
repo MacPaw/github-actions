@@ -22,6 +22,18 @@ All reusable workflows are located in `.github/workflows` folder
   - ⚡ **Performance Optimized** - Parallel execution, intelligent caching
   - [📚 Detailed Documentation](docs/workflows/symfony-php-reusable.md)
 
+- [release-reusable.yml](.github/workflows/release-reusable.yml) - Fully automated release workflow using semantic-release
+  - 🤖 **Fully Automated** - No manual version bumping or changelog writing required
+  - ✅ **Semantic Versioning** - Automatic version calculation from commit messages
+  - 🏷️ **Auto Tag & Release** - Automatically creates tags and GitHub releases
+  - 📝 **Auto-Generated Changelogs** - Beautiful, categorized release notes
+  - 🎯 **Conventional Commits** - Based on conventional commit standards
+  - 🔀 **Multi-Branch Support** - main/master, next, beta, alpha, maintenance branches
+  - 🛡️ **Safe & Idempotent** - Won't create duplicate releases
+  - 🧪 **Dry Run Mode** - Test releases without publishing
+  - 🔑 **Secure Authentication** - Uses GH_TOKEN repository secret for release operations
+  - [📚 Detailed Documentation](docs/workflows/release.md)
+
 ### Documentation
 
 - [Symfony PHP Reusable Workflow](docs/workflows/symfony-php-reusable.md) - Complete workflow documentation with:
@@ -34,6 +46,23 @@ All reusable workflows are located in `.github/workflows` folder
   - 🔧 Troubleshooting guide
   - 📊 Analysis of MacPaw's Symfony repositories
   - 📈 Best practices and recommendations
+
+- [Release Workflow](docs/workflows/release.md) - Complete semantic-release documentation with:
+  - 🤖 Fully automated release process using semantic-release
+  - 📝 Conventional commits specification and examples
+  - 🏷️ Automatic version calculation (feat → minor, fix → patch, BREAKING → major)
+  - 🚀 Multiple usage examples (feature, bugfix, breaking changes, pre-releases)
+  - 🔀 Multi-branch release channels (main, beta, alpha, maintenance)
+  - 📊 Auto-generated categorized changelogs
+  - 🧪 Dry run mode for testing releases
+  - 🔑 GH_TOKEN secret configuration and setup guide
+  - 🔐 GitHub App token support for organizations
+  - 🎯 Fine-grained Personal Access Token (PAT) instructions
+  - ⚙️ Configuration via .releaserc.json
+  - 🔧 Comprehensive troubleshooting guide
+  - 📋 Best practices for conventional commits
+  - 🛠️ Advanced configuration and customization examples
+  - 🔄 Migration guide from manual releases
 
 ### Contributing
 
@@ -58,4 +87,5 @@ For information about reporting security vulnerabilities, please see our [Securi
 - [MacPaw GitHub Organization](https://github.com/MacPaw/)
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Symfony PHP Package reusable workflow](docs/workflows/symfony-php-reusable.md)
+- [Release workflow](docs/workflows/release.md)
 - [Repository Analysis](ANALYSIS.md)
